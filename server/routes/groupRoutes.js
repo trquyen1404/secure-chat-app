@@ -1,24 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const groupController = require('../controllers/groupController');
-const { authenticate } = require('../middleware/auth');
+const auth = require('../middleware/auth');
+const requireGroupMembership = require('../middleware/groupMembership');
+const { validate, createGroupSchema } = require('../middleware/validation');
 
 // All routes require authentication
-router.use(authenticate);
+router.use(auth);
 
-// Create a new group
-router.post('/', groupController.createGroup);
+// Create a new group (no membership check — creator is being added)
+router.post('/', validate(createGroupSchema), groupController.createGroup);
 
-// Join an existing group (by invitation code or ID)
-router.post('/:groupId/join', groupController.joinGroup);
+// Get group info + members (must be a member)
+router.get('/:groupId', requireGroupMembership, groupController.getGroup);
 
-// Get group info + members
-router.get('/:groupId', groupController.getGroup);
+// Get group message history (must be a member)
+router.get('/:groupId/messages', requireGroupMembership, groupController.getGroupMessages);
 
-// Get group message history
-router.get('/:groupId/messages', groupController.getGroupMessages);
+// Send a new group message (must be a member)
+router.post('/:groupId/messages', requireGroupMembership, groupController.sendGroupMessage);
 
-// Send a new group message
-router.post('/:groupId/messages', groupController.sendGroupMessage);
+// React to a message (must be a member of the group)
+router.post('/:groupId/messages/:messageId/react', requireGroupMembership, groupController.reactGroupMessage);
+
+// Delete (revoke) a message (must be a member — ownership check is in the controller)
+router.delete('/:groupId/messages/:messageId', requireGroupMembership, groupController.deleteGroupMessage);
 
 module.exports = router;

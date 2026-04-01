@@ -5,10 +5,20 @@ import Register from './pages/Register';
 import Login from './pages/Login';
 import ChatApp from './pages/ChatApp';
 
+import RestoreKeyModal from './components/RestoreKeyModal';
+
 const PrivateRoute = ({ children }) => {
-  const { token, loading } = useAuth();
+  const { token, loading, needsPinRestore } = useAuth();
   if (loading) return null;
-  return token ? children : <Navigate to="/login" replace />;
+  
+  if (!token) return <Navigate to="/login" replace />;
+  
+  return (
+    <>
+      {children}
+      {needsPinRestore && <RestoreKeyModal />}
+    </>
+  );
 };
 
 function App() {

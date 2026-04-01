@@ -86,14 +86,14 @@ const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessa
   const hasReactions = Object.keys(reactionCounts).length > 0;
 
   return (
-    <div className={`flex w-full mt-4 space-x-3 max-w-xl group relative ${isMe ? 'ml-auto justify-end' : ''}`} onMouseLeave={() => setShowReactionsMenu(false)}>
+    <div className={`flex w-full mt-4 space-x-3 max-w-xl group relative animate-fade-in-up ${isMe ? 'ml-auto justify-end' : ''}`} onMouseLeave={() => setShowReactionsMenu(false)}>
       
       {/* HOVER TOOLBAR */}
-      <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800/80 backdrop-blur rounded-full px-2 py-1 shadow-lg border border-slate-700/50 ${isMe ? 'right-full mr-3' : 'left-full ml-3'} z-20`}>
+      <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-slate-800/80 backdrop-blur rounded-full px-2 py-1 shadow-lg border border-gray-200 dark:border-slate-700/50 ${isMe ? 'right-full mr-3' : 'left-full ml-3'} z-20`}>
          {!message.isDeleted && (
             <>
                <div className="relative">
-                 <button onClick={() => setShowReactionsMenu(!showReactionsMenu)} className="p-1.5 text-slate-400 hover:text-amber-400 rounded-full hover:bg-slate-700/80 transition-colors" title="Bày tỏ cảm xúc">
+                 <button onClick={() => setShowReactionsMenu(!showReactionsMenu)} className="p-1.5 text-gray-500 dark:text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700/80 transition-colors" title="Bày tỏ cảm xúc">
                     <Smile className="w-4 h-4" />
                  </button>
                  {/* Reaction Picker Popup */}
@@ -143,8 +143,8 @@ const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessa
         <div className={`relative px-4 py-3 rounded-[20px] shadow-sm text-sm shadow-black/10 transition-all min-w-[120px] ${
           isMe
             ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-tr-sm self-end'
-            : 'bg-slate-800 text-slate-200 border border-slate-700/50 rounded-tl-sm self-start'
-        } ${message.isDeleted ? '!bg-transparent !bg-none border-2 border-dashed border-slate-600/50 text-slate-400 shadow-none' : ''}`}>
+            : 'bg-white dark:bg-slate-800 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700/50 rounded-tl-sm self-start shadow-sm'
+        } ${message.isDeleted ? '!bg-transparent !bg-none border-2 border-dashed border-gray-300 dark:border-slate-600/50 text-gray-400 dark:text-slate-400 shadow-none' : ''}`}>
            
            {/* Header: Sender context */}
            {!message.isDeleted && (

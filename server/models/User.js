@@ -35,6 +35,26 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  online: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  encryptedPrivateKey: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  keyBackupSalt: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  keyBackupIv: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  tokenVersion: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
 }, {
   timestamps: true,
 });

@@ -31,6 +31,12 @@ const GroupMember = sequelize.define('GroupMember', {
   },
 }, {
   timestamps: true,
+  indexes: [
+    {
+      unique: true,
+      fields: ['groupId', 'userId']
+    }
+  ]
 });
 
 
