@@ -1,11 +1,21 @@
-const { v4: uuidv4 } = require('uuid');
-const { generateAESKey } = require('../utils/crypto'); // we will reuse generateAESKey from client utils? Actually server may not have this, so we can use crypto library
 const crypto = require('crypto');
-const { encryptKeyRSA } = require('../utils/crypto'); // assume same utils are available on server side
+const { Op } = require('sequelize');
 const Group = require('../models/Group');
 const GroupMember = require('../models/GroupMember');
 const GroupMessage = require('../models/GroupMessage');
 const User = require('../models/User');
+
+/**
+ * Encrypts a buffer (aes key) using an RSA PEM public key.
+ * Uses RSA-OAEP with SHA-256 to match the client's Web Crypto configuration.
+ */
+function encryptKeyRSA(buffer, pemKey) {
+  return crypto.publicEncrypt({
+    key: pemKey,
+    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+    oaepHash: 'sha256',
+  }, buffer).toString('base64');
+}
 
 /**
  * Create a new group.
@@ -65,8 +75,23 @@ exports.getGroup = async (req, res) => {
 exports.getGroupMessages = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const messages = await GroupMessage.findAll({ where: { groupId }, order: [['createdAt', 'ASC']] });
-    res.json(messages);
+    const { cursor } = req.query;
+    const limit = 50;
+
+    const whereClause = { groupId };
+    if (cursor) {
+      whereClause.createdAt = {
+        [Op.lt]: new Date(cursor)
+      };
+    }
+
+    const messages = await GroupMessage.findAll({ 
+      where: whereClause, 
+      order: [['createdAt', 'DESC']],
+      limit 
+    });
+    
+    res.json(messages.reverse());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch messages' });

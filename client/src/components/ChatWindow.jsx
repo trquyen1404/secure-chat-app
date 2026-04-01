@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import api from '../utils/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { useCall } from '../context/CallContext';
-import { generateAESKey, encryptMessageAES, encryptKeyRSA, decryptKeyRSA, decryptMessageAES, generateIV } from '../utils/crypto';
+import { generateAESKey, encryptMessageAES, encryptKeyRSA, decryptKeyRSA, decryptMessageAES } from '../utils/crypto';
 import MessageBubble from './MessageBubble';
 import { Send, Lock, Loader2, ArrowLeft, ShieldCheck, ImagePlus, Paperclip, Mic, MicOff, Disc2, Trash2, Phone, Video, CornerUpLeft, X } from 'lucide-react';
 
@@ -12,6 +12,10 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const [newMessage, setNewMessage] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  
+  // Pagination States
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   
   // Voice & STT States
   const [isListening, setIsListening] = useState(false);
@@ -25,6 +29,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const { callUser } = useCall();
   
   const messagesEndRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const typingTimeout = useRef(null);
   const fileInputRef = useRef(null);
   const docInputRef = useRef(null);
@@ -68,71 +73,106 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     }
   }, []);
 
+  // Only scroll to bottom on initial load or new message, not on infinite scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+    if (!isLoadingMore) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isTyping, isLoadingMore]);
+
+  const loadMessages = async (isLoadMore = false) => {
+    if (isLoadMore) setIsLoadingMore(true);
+    else setLoadingHistory(true);
+    
+    try {
+      const cursor = isLoadMore && messages.length > 0 ? messages[0].createdAt : null;
+      const res = await api.get(`/api/messages/${chatUser.id}${cursor ? `?cursor=${cursor}` : ''}`);
+      
+      const newBatch = res.data;
+      if (newBatch.length < 50) setHasMore(false);
+
+      const decryptedMessages = await Promise.all(newBatch.map(async (msg) => {
+        if (msg.isDeleted) return { ...msg, decryptedContent: '[Tin nhắn đã bị thu hồi]' };
+        try {
+          if (!privateKey) return { ...msg, decryptedContent: '[Chưa mở khóa thiết bị]' };
+          const encryptedAesKey = msg.senderId === currentUser.id
+            ? msg.encryptedAesKeyForSender
+            : msg.encryptedAesKeyForRecipient;
+          const aesKey = await decryptKeyRSA(encryptedAesKey, privateKey);
+          const content = await decryptMessageAES(msg.encryptedContent, aesKey, msg.iv);
+          return { ...msg, decryptedContent: content };
+        } catch (err) {
+          console.error('[decryptMessages] Error decrypting historical message:', msg.id, err);
+          return { ...msg, decryptedContent: '[Lỗi giải mã: Khóa không đúng]' };
+        }
+      }));
+      
+      if (isLoadMore) {
+        // Save scroll height before prepending
+        const container = scrollContainerRef.current;
+        const previousScrollHeight = container ? container.scrollHeight : 0;
+        
+        setMessages(prev => [...decryptedMessages, ...prev]);
+        
+        // Restore scroll position after React renders
+        setTimeout(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight - previousScrollHeight;
+          }
+        }, 0);
+      } else {
+        setMessages(decryptedMessages);
+        setHasMore(newBatch.length === 50);
+      }
+      
+      // Mark as Read
+      if (!isLoadMore && socket && decryptedMessages.some(m => m.senderId === chatUser.id && !m.readAt)) {
+         socket.emit('markAsRead', { senderId: chatUser.id });
+      }
+    } catch (error) {
+      console.error('Failed to fetch messages', error);
+    } finally {
+      if (isLoadMore) setIsLoadingMore(false);
+      else setLoadingHistory(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchHistory = async () => {
-      setLoadingHistory(true);
-      try {
-        const res = await axios.get(`/api/messages/${chatUser.id}`, {
-           headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        const decryptedMessages = res.data.map(msg => {
-          if (msg.isDeleted) return { ...msg, decryptedContent: '[Tin nhắn đã bị thu hồi]' };
-          try {
-            if (!privateKey) {
-              return { ...msg, decryptedContent: '[Chưa mở khóa thiết bị]' };
-            }
-            const encryptedAesKey = msg.senderId === currentUser.id 
-              ? msg.encryptedAesKeyForSender 
-              : msg.encryptedAesKeyForRecipient;
-              
-            const aesKey = decryptKeyRSA(encryptedAesKey, privateKey);
-            const content = decryptMessageAES(msg.encryptedContent, aesKey, msg.iv);
-            return { ...msg, decryptedContent: content };
-          } catch (err) {
-             return { ...msg, decryptedContent: '[Lỗi giải mã: Khóa không đúng]' };
-          }
-        });
-        
-        setMessages(decryptedMessages);
-        
-        // Mark as Read when fetching history
-        if (socket && decryptedMessages.some(m => m.senderId === chatUser.id && !m.readAt)) {
-           socket.emit('markAsRead', { senderId: chatUser.id });
-        }
-      } catch (error) {
-        console.error('Failed to fetch messages', error);
-      } finally {
-        setLoadingHistory(false);
-      }
-    };
-    
-    if (chatUser && token) fetchHistory();
+    if (chatUser && token) {
+      setHasMore(true);
+      loadMessages();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatUser, token, privateKey, currentUser.id, socket]);
+
+  const handleScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (container.scrollTop === 0 && hasMore && !isLoadingMore && !loadingHistory) {
+      loadMessages(true);
+    }
+  };
 
   useEffect(() => {
     if (!socket) return;
     
-    const handleNewMessage = (msg) => {
+    const handleNewMessage = async (msg) => {
       if (
         (msg.senderId === currentUser.id && msg.recipientId === chatUser.id) ||
         (msg.senderId === chatUser.id && msg.recipientId === currentUser.id)
       ) {
         let decryptedContent = '[Chưa mở khóa thiết bị gốc]';
         try {
-           if (privateKey) {
-             const encryptedAesKey = msg.senderId === currentUser.id 
-               ? msg.encryptedAesKeyForSender 
-               : msg.encryptedAesKeyForRecipient;
-             const aesKey = decryptKeyRSA(encryptedAesKey, privateKey);
-             decryptedContent = decryptMessageAES(msg.encryptedContent, aesKey, msg.iv);
-           }
+          if (privateKey) {
+            const encryptedAesKey = msg.senderId === currentUser.id
+              ? msg.encryptedAesKeyForSender
+              : msg.encryptedAesKeyForRecipient;
+            const aesKey = await decryptKeyRSA(encryptedAesKey, privateKey);
+            decryptedContent = await decryptMessageAES(msg.encryptedContent, aesKey, msg.iv);
+          }
         } catch (err) {
-           decryptedContent = '[Lỗi giải mã]';
+          console.error('[decryptMessage] Error decrypting new socket message:', msg.id, err);
+          decryptedContent = '[Lỗi giải mã]';
         }
         
         setMessages(prev => [...prev, { ...msg, decryptedContent }]);
@@ -186,24 +226,25 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
   // --- ACTIONS ---
   
-  const sendEncryptedPayload = (messageText) => {
+  const sendEncryptedPayload = async (messageText) => {
     try {
-      const aesKey = generateAESKey();
-      const iv = generateIV(); 
-      
-      const encryptedContent = encryptMessageAES(messageText, aesKey, iv);
-      const encryptedAesKeyForSender = encryptKeyRSA(aesKey, currentUser.publicKey);
-      const encryptedAesKeyForRecipient = encryptKeyRSA(aesKey, chatUser.publicKey);
-      
+      // Generate a fresh AES-256-GCM key for each message
+      const aesKey = await generateAESKey();
+      // Encrypt returns { ciphertextB64, ivB64 } — IV is 96-bit, embedded in result
+      const { ciphertextB64, ivB64 } = await encryptMessageAES(messageText, aesKey);
+      // Wrap the AES key for both sender and recipient using their RSA public keys
+      const encryptedAesKeyForSender = await encryptKeyRSA(aesKey, currentUser.publicKey);
+      const encryptedAesKeyForRecipient = await encryptKeyRSA(aesKey, chatUser.publicKey);
+
       socket.emit('sendMessage', {
         recipientId: chatUser.id,
-        encryptedContent,
+        encryptedContent: ciphertextB64,
         encryptedAesKeyForSender,
         encryptedAesKeyForRecipient,
-        iv,
-        replyToId: replyMessage ? replyMessage.id : null
+        iv: ivB64,
+        replyToId: replyMessage ? replyMessage.id : null,
       });
-      setReplyMessage(null); // reset reply
+      setReplyMessage(null);
     } catch (error) {
       console.error('Encryption error', error);
       alert('Không thể gửi tin mã hóa: ' + error.message);
@@ -212,17 +253,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (isRecording) {
-      stopRecordingAndSend();
-      return;
-    }
+    if (isRecording) { stopRecordingAndSend(); return; }
     if (!newMessage.trim() && !isListening) return;
     if (!newMessage.trim()) return;
-    
     const text = newMessage;
     setNewMessage('');
     if (socket) socket.emit('stopTyping', { recipientId: chatUser.id });
-    sendEncryptedPayload(text);
+    await sendEncryptedPayload(text);
   };
 
   const handleInputTyping = (e) => {
@@ -342,13 +379,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-900 border-l border-slate-800 relative z-10 w-full">
-      <div className="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 pointer-events-none"></div>
+    <div className="flex-1 flex flex-col bg-white dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800 relative z-10 w-full transition-colors duration-300">
+      <div className="absolute inset-0 dark:bg-gradient-to-b dark:from-slate-900 dark:via-slate-900/90 dark:to-slate-950 pointer-events-none transition-colors duration-300"></div>
 
       {/* Header */}
-      <div className="h-[72px] px-6 flex items-center justify-between border-b border-slate-800/80 bg-slate-900/80 backdrop-blur-xl shrink-0 sticky top-0 z-20 shadow-sm">
+      <div className="h-[72px] px-6 flex items-center justify-between border-b border-gray-200 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shrink-0 sticky top-0 z-20 shadow-sm transition-colors duration-300">
         <div className="flex items-center gap-4">
-          <button onClick={onClose} className="p-2 -ml-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 transition md:hidden">
+          <button onClick={onClose} className="p-2 -ml-2 text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition md:hidden">
             <ArrowLeft className="w-5 h-5" />
           </button>
           
@@ -357,11 +394,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
               {chatUser.username.charAt(0).toUpperCase()}
             </div>
             {isOnline && (
-              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-[2.5px] border-slate-900 rounded-full"></div>
+              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-[2.5px] border-white dark:border-slate-900 rounded-full"></div>
             )}
           </div>
           <div>
-            <h2 className="font-semibold text-slate-100 text-[15px]">{chatUser.username}</h2>
+            <h2 className="font-semibold text-gray-800 dark:text-slate-100 text-[15px] transition-colors">{chatUser.username}</h2>
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
                <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
                Mã hoá đầu cuối (E2EE)
@@ -369,11 +406,10 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           </div>
         </div>
 
-        {/* --- WEBRTC CALL ACTIONS --- */}
         <div className="flex items-center gap-2">
           <button 
              onClick={() => callUser(chatUser.id, false)} 
-             className="w-10 h-10 rounded-full flex items-center justify-center text-indigo-400 hover:bg-slate-800 hover:text-indigo-300 transition-colors"
+             className="w-10 h-10 rounded-full flex items-center justify-center text-indigo-500 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
              title="Gọi điện âm thanh P2P"
           >
              <Phone className="w-5 h-5" />
@@ -389,7 +425,16 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 z-10 relative custom-scrollbar scroll-smooth">
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 z-10 relative custom-scrollbar scroll-smooth"
+      >
+        {isLoadingMore && (
+          <div className="flex justify-center items-center py-2">
+            <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+          </div>
+        )}
          <div className="text-center mb-8 mt-4">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-xs text-indigo-300 shadow-sm">
                <Lock className="w-3.5 h-3.5" />
@@ -434,7 +479,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       </div>
 
       {/* Input Area */}
-      <div className="bg-slate-900/90 backdrop-blur-xl border-t border-slate-800/80 z-20 shrink-0 relative">
+      <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-gray-200 dark:border-slate-800/80 z-20 shrink-0 relative transition-colors duration-300">
         {/* Reply Indicator */}
         {replyMessage && (
            <div className="absolute bottom-full left-0 w-full bg-slate-800/90 border-t border-slate-700 p-3 flex items-center justify-between">
@@ -463,7 +508,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="p-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-full transition-colors shrink-0"
+                className="p-2.5 bg-transparent hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 rounded-full transition-colors shrink-0"
                 title="Đính kèm Hình ảnh"
               >
                 <ImagePlus className="w-5 h-5" />
@@ -472,7 +517,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
               <button
                 type="button"
                 onClick={() => docInputRef.current?.click()}
-                className="p-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-full transition-colors shrink-0"
+                className="p-2.5 bg-transparent hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-full transition-colors shrink-0"
                 title="Đính kèm Tài liệu"
               >
                 <Paperclip className="w-5 h-5" />
@@ -511,13 +556,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
                   value={newMessage}
                   onChange={handleInputTyping}
                   placeholder="Nhập tin nhắn bảo mật của bạn..."
-                  className="w-full border text-[15px] rounded-full py-3 pl-5 pr-12 outline-none transition-all shadow-inner bg-slate-800 text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 border-slate-700"
+                  className="w-full border text-[15px] rounded-full py-3 pl-5 pr-12 outline-none transition-all shadow-inner bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 border-gray-200 dark:border-slate-700"
                 />
                 {/* STT Mic Toggle Button */}
                 <button
                   type="button"
                   onClick={toggleListen}
-                  className={`absolute right-4 top-1/2 -translate-y-1/2 transition z-30 ${isListening ? 'text-emerald-500 animate-pulse' : 'text-slate-400 hover:text-indigo-400'}`}
+                  className={`absolute right-4 top-1/2 -translate-y-1/2 transition z-30 ${isListening ? 'text-emerald-500 animate-pulse' : 'text-gray-400 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400'}`}
                   title="Nhận diện giọng nói thành Văn Bản"
                 >
                    {isListening ? <Disc2 className="w-4 h-4 animate-spin" /> : <MicOff className="w-4 h-4" />}

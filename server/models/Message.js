@@ -69,12 +69,19 @@ const Message = sequelize.define('Message', {
     type: DataTypes.DATE,
     allowNull: true,
   },
-  deliveredAt: {
-    type: DataTypes.DATE,
-    allowNull: true,
-  }
 }, {
-  timestamps: true, 
+  timestamps: true,
+  indexes: [
+    {
+      fields: ['senderId', 'recipientId']
+    },
+    {
+      fields: ['recipientId', 'senderId']
+    },
+    {
+      fields: ['createdAt']
+    }
+  ]
 });
 
 // Relationships

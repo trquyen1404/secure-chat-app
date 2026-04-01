@@ -70,6 +70,14 @@ const GroupMessage = sequelize.define('GroupMessage', {
   },
 }, {
   timestamps: true,
+  indexes: [
+    {
+      fields: ['groupId']
+    },
+    {
+      fields: ['createdAt']
+    }
+  ]
 });
 
 module.exports = GroupMessage;
