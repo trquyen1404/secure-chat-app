@@ -23,10 +23,22 @@ exports.register = async (req, res) => {
 
     // --- Input Validation ---
     if (!username || typeof username !== 'string' || username.length < 3 || username.length > 50) {
-      return res.status(400).json({ error: 'Username phải có từ 3–30 ký tự' });
+      return res.status(400).json({ error: 'Username phải có từ 3–50 ký tự' });
     }
-    if (!password || typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 8 ký tự' });
+
+    // Password strength validation
+    const passwordErrors = [];
+    if (!password || typeof password !== 'string') {
+      passwordErrors.push('Mật khẩu không được để trống');
+    } else {
+      if (password.length < 8)         passwordErrors.push('Mật khẩu phải có ít nhất 8 ký tự');
+      if (!/[A-Z]/.test(password))     passwordErrors.push('Mật khẩu phải có ít nhất 1 chữ cái viết HOA');
+      if (!/[a-z]/.test(password))     passwordErrors.push('Mật khẩu phải có ít nhất 1 chữ cái viết thường');
+      if (!/[0-9]/.test(password))     passwordErrors.push('Mật khẩu phải có ít nhất 1 chữ số');
+      if (/\s/.test(password))         passwordErrors.push('Mật khẩu không được chứa dấu cách');
+    }
+    if (passwordErrors.length > 0) {
+      return res.status(400).json({ error: passwordErrors.join('. ') });
     }
     if (!publicKey || typeof publicKey !== 'string') {
       return res.status(400).json({ error: 'Public key is required' });
