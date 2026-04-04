@@ -39,6 +39,27 @@ export async function generateRSAKeyPair() {
   return { publicKeyPem, privateKey: keyPair.privateKey }; // privateKey is a CryptoKey object
 }
 
+// ── ECDH Key Pair ───────────────────────────────────────────────────────────
+
+/**
+ * Generates an Elliptic Curve Diffie-Hellman key pair.
+ * Default is P-384 for strong security, often used in government/academic standards.
+ * 
+ * @returns {{ ecPublicKeyPem: string, ecPrivateKey: CryptoKey }}
+ */
+export async function generateECDHKeyPair(curve = 'P-384') {
+  const keyPair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: curve },
+    true, // Temporarily extractable to wrap with PIN
+    ['deriveKey']
+  );
+
+  const spki = await window.crypto.subtle.exportKey('spki', keyPair.publicKey);
+  const ecPublicKeyPem = spkiToECPem(spki);
+
+  return { ecPublicKeyPem, ecPrivateKey: keyPair.privateKey };
+}
+
 // ── AES-256-GCM Symmetric Encryption ────────────────────────────────────────
 
 /**
@@ -137,6 +158,43 @@ async function importPublicKey(pem) {
   const b64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\n/g, '');
   const spki = base64ToArrayBuffer(b64);
   return window.crypto.subtle.importKey('spki', spki, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+}
+
+function spkiToECPem(spki) {
+  const b64 = arrayBufferToBase64(spki);
+  const lines = b64.match(/.{1,64}/g).join('\n');
+  return `-----BEGIN EC PUBLIC KEY-----\n${lines}\n-----END EC PUBLIC KEY-----`;
+}
+
+async function importECPublicKey(pem, curve = 'P-384') {
+  const b64 = pem.replace(/-----BEGIN EC PUBLIC KEY-----|-----END EC PUBLIC KEY-----|\n/g, '');
+  const spki = base64ToArrayBuffer(b64);
+  return window.crypto.subtle.importKey('spki', spki, { name: 'ECDH', namedCurve: curve }, false, []);
+}
+
+// ── ECDH Key Agreement ──────────────────────────────────────────────────────
+
+/**
+ * Derives a shared AES-GCM key using your EC private key and the peer's EC public key.
+ * This satisfies the "sử dụng ECDH" requirement.
+ *
+ * @param {CryptoKey} myEcPrivateKey 
+ * @param {string} peerEcPublicKeyPem 
+ * @returns {CryptoKey} The shared AES-256-GCM key
+ */
+export async function deriveSharedAESKey(myEcPrivateKey, peerEcPublicKeyPem, curve = 'P-384') {
+  const peerPublicKey = await importECPublicKey(peerEcPublicKeyPem, curve);
+  
+  return window.crypto.subtle.deriveKey(
+    {
+      name: 'ECDH',
+      public: peerPublicKey
+    },
+    myEcPrivateKey,
+    { name: 'AES-GCM', length: 256 },
+    false, // Shared AES key shouldn't be extracted
+    ['encrypt', 'decrypt']
+  );
 }
 
 function arrayBufferToBase64(buffer) {

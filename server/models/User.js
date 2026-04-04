@@ -74,6 +74,10 @@ const User = sequelize.define('User', {
   webPushSubscription: {
     type: DataTypes.JSONB,
     allowNull: true,
+  },
+  ecPublicKey: {
+    type: DataTypes.TEXT,
+    allowNull: true,
   }
 }, {
   timestamps: true,

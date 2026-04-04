@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import api from '../utils/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { LogOut, Search, ShieldCheck, Moon, Sun, Settings, Pin, Plus } from 'lucide-react';
+import { LogOut, Search, ShieldCheck, Moon, Sun, Settings, Pin, Plus, Zap } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { useNavigate } from 'react-router-dom';
 import MyProfileSettings from './MyProfileSettings';
 
 const Sidebar = ({ selectedUser, onSelectUser }) => {
@@ -15,6 +16,7 @@ const Sidebar = ({ selectedUser, onSelectUser }) => {
   const { token, logout, user } = useAuth();
   const { onlineUsers } = useSocket();
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -71,6 +73,13 @@ const Sidebar = ({ selectedUser, onSelectUser }) => {
           </div>
         </button>
         <div className="flex items-center gap-1">
+          <button 
+            onClick={() => navigate('/benchmark')}
+            className="p-2 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all animate-pulse"
+            title="Đánh giá So sánh Thuật toán Đồ án"
+          >
+            <Zap className="w-5 h-5" />
+          </button>
           <button 
             onClick={toggleTheme}
             className="p-2 text-gray-500 dark:text-slate-500 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-gray-100 dark:hover:bg-slate-800/50 rounded-lg transition-all"

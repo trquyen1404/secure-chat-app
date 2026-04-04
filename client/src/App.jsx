@@ -4,7 +4,7 @@ import { useAuth } from './context/AuthContext';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import ChatApp from './pages/ChatApp';
-
+import BenchmarkMode from './pages/BenchmarkMode';
 import RestoreKeyModal from './components/RestoreKeyModal';
 
 const PrivateRoute = ({ children }) => {
@@ -30,6 +30,11 @@ function App() {
         <Route path="/" element={
           <PrivateRoute>
             <ChatApp />
+          </PrivateRoute>
+        } />
+        <Route path="/benchmark" element={
+          <PrivateRoute>
+            <BenchmarkMode />
           </PrivateRoute>
         } />
       </Routes>
