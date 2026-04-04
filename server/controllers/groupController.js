@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const { Op } = require('sequelize');
 const Group = require('../models/Group');
 const GroupMember = require('../models/GroupMember');
@@ -6,21 +5,9 @@ const GroupMessage = require('../models/GroupMessage');
 const User = require('../models/User');
 
 /**
- * Encrypts a buffer (aes key) using an RSA PEM public key.
- * Uses RSA-OAEP with SHA-256 to match the client's Web Crypto configuration.
- */
-function encryptKeyRSA(buffer, pemKey) {
-  return crypto.publicEncrypt({
-    key: pemKey,
-    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-    oaepHash: 'sha256',
-  }, buffer).toString('base64');
-}
-
-/**
  * Create a new group.
  * Expected body: { name: string, avatarUrl?: string, memberIds: [uuid] }
- * The creator (req.userId) is automatically added as member.
+ * The creator (req.userId) is automatically added as admin member.
  */
 exports.createGroup = async (req, res) => {
   try {
@@ -28,27 +15,16 @@ exports.createGroup = async (req, res) => {
     const creatorId = req.userId;
     if (!name) return res.status(400).json({ error: 'Group name required' });
 
-    // Create group record
-    const group = await Group.create({ name, avatarUrl: avatarUrl || null });
+    const group = await Group.create({ name, avatarUrl: avatarUrl || null, createdBy: creatorId });
 
-    // Generate a random 256‑bit AES key for the group
-    const groupKey = crypto.randomBytes(32); // Buffer
-
-    // All members = creator + supplied memberIds (unique)
     const allMemberIds = Array.from(new Set([creatorId, ...(memberIds || [])]));
 
-    // For each member, fetch publicKey and encrypt the group key
-    const memberPromises = allMemberIds.map(async (uid) => {
-      const user = await User.findByPk(uid);
-      if (!user) throw new Error(`User ${uid} not found`);
-      const encryptedGroupKey = encryptKeyRSA(groupKey, user.publicKey);
-      return GroupMember.create({
-        groupId: group.id,
-        userId: uid,
-        encryptedGroupKey,
-      });
-    });
-    await Promise.all(memberPromises);
+    const memberRows = allMemberIds.map((uid) => ({
+      groupId: group.id,
+      userId: uid,
+      role: uid === creatorId ? 'admin' : 'member',
+    }));
+    await GroupMember.bulkCreate(memberRows);
 
     res.status(201).json({ groupId: group.id, name: group.name, avatarUrl: group.avatarUrl });
   } catch (err) {
@@ -63,7 +39,10 @@ exports.getGroup = async (req, res) => {
     const { groupId } = req.params;
     const group = await Group.findByPk(groupId);
     if (!group) return res.status(404).json({ error: 'Group not found' });
-    const members = await GroupMember.findAll({ where: { groupId }, include: [{ model: User, as: 'User', attributes: ['id', 'username', 'avatarUrl'] }] });
+    const members = await GroupMember.findAll({
+      where: { groupId },
+      include: [{ model: User, as: 'User', attributes: ['id', 'username', 'avatarUrl', 'publicKey'] }]
+    });
     res.json({ group, members });
   } catch (err) {
     console.error(err);
@@ -80,17 +59,15 @@ exports.getGroupMessages = async (req, res) => {
 
     const whereClause = { groupId };
     if (cursor) {
-      whereClause.createdAt = {
-        [Op.lt]: new Date(cursor)
-      };
+      whereClause.createdAt = { [Op.lt]: new Date(cursor) };
     }
 
-    const messages = await GroupMessage.findAll({ 
-      where: whereClause, 
+    const messages = await GroupMessage.findAll({
+      where: whereClause,
       order: [['createdAt', 'DESC']],
-      limit 
+      limit
     });
-    
+
     res.json(messages.reverse());
   } catch (err) {
     console.error(err);
@@ -98,39 +75,36 @@ exports.getGroupMessages = async (req, res) => {
   }
 };
 
-/** Send a new group message */
+/** Send a new group message (Double Ratchet format) */
 exports.sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { encryptedContent, encryptedAesKeyForSender, encryptedAesKeyForRecipient, iv, replyToId } = req.body;
+    const { encryptedContent, ratchetKey, n, pn, iv, replyToId } = req.body;
     const senderId = req.userId;
 
-    // Save message
     const message = await GroupMessage.create({
       groupId,
       senderId,
       encryptedContent,
-      encryptedAesKeyForSender,
-      encryptedAesKeyForRecipient,
+      ratchetKey,
+      n,
+      pn,
       iv,
       replyToId: replyToId || null,
     });
 
-    const payload = {
+    res.status(201).json({
       id: message.id,
       groupId,
       senderId,
       encryptedContent,
-      encryptedAesKeyForSender,
-      encryptedAesKeyForRecipient,
+      ratchetKey,
+      n,
+      pn,
       iv,
       replyToId: replyToId || null,
       createdAt: message.createdAt,
-    };
-
-    // Emit via socket (the socket service will broadcast to all members)
-    // Here we just respond OK; actual broadcast is handled in socketService
-    res.status(201).json(payload);
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to send group message' });
@@ -141,7 +115,7 @@ exports.sendGroupMessage = async (req, res) => {
 exports.reactGroupMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
-    const { reaction } = req.body; // e.g., '❤️' or null to remove
+    const { reaction } = req.body;
     const msg = await GroupMessage.findByPk(messageId);
     if (!msg) return res.status(404).json({ error: 'Message not found' });
     const current = { ...(msg.reactions || {}) };
@@ -160,10 +134,11 @@ exports.deleteGroupMessage = async (req, res) => {
     const { messageId } = req.params;
     const msg = await GroupMessage.findByPk(messageId);
     if (!msg || msg.senderId !== req.userId) return res.status(403).json({ error: 'Not allowed' });
-    await msg.update({ isDeleted: true, encryptedContent: null, encryptedAesKeyForSender: null, encryptedAesKeyForRecipient: null, iv: null });
+    await msg.update({ isDeleted: true, encryptedContent: null, ratchetKey: null, iv: null });
     res.json({ messageId, isDeleted: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete' });
   }
 };
+

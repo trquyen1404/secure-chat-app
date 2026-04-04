@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { unwrapPrivateKeyWithPIN } from '../utils/crypto';
+import api from '../utils/axiosConfig';
+import { 
+  base64ToArrayBuffer, 
+  unwrapIdentityBundleWithPIN,
+  generateX25519KeyPair,
+  signDataECDSA
+} from '../utils/crypto';
 import { saveKey } from '../utils/keyStore';
 import { Lock, Loader2, KeyRound } from 'lucide-react';
 
@@ -21,26 +27,61 @@ const RestoreKeyModal = () => {
     setError(null);
     try {
       const { encryptedPrivateKey, keyBackupSalt, keyBackupIv } = user;
-      
       if (!encryptedPrivateKey || !keyBackupSalt || !keyBackupIv) {
-         throw new Error('Dữ liệu khôi phục không hợp lệ hoặc đã bị lỗi trên Server.');
+        throw new Error('Backup data missing or corrupted.');
       }
 
-      // Decrypt using the user's PIN
-      const finalNonExtractablePrivateKey = await unwrapPrivateKeyWithPIN(
-        encryptedPrivateKey, 
-        pin, 
-        keyBackupSalt, 
-        keyBackupIv
+      // Unwrap both identity keys
+      const { pkcs8Sign, pkcs8Dh } = await unwrapIdentityBundleWithPIN(
+        encryptedPrivateKey, keyBackupSalt, keyBackupIv, pin
       );
 
-      // Save the securely recovered private key to IndexedDB
-      await saveKey(`privateKey_${user.id}`, finalNonExtractablePrivateKey);
+      // Import ECDSA
+      const restoredSignKey = await window.crypto.subtle.importKey(
+        'pkcs8', pkcs8Sign, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+      );
+
+      // Import X25519
+      const restoredDhKey = await window.crypto.subtle.importKey(
+        'pkcs8', pkcs8Dh, { name: 'X25519' }, false, ['deriveKey', 'deriveBits']
+      );
+
+      await saveKey(`ik_sign_priv_${user.id}`, restoredSignKey);
+      await saveKey(`ik_dh_priv_${user.id}`, restoredDhKey);
+
+      // --- CRITICAL SECURITY STEP ---
+      // The user successfully recovered their identity but their device lost the old SPK and OPKs.
+      // We must generate NEW PreKeys, sign them with the restored Identity Key, and upload them.
+      const spk = await generateX25519KeyPair();
+      const spkSignature = await signDataECDSA(restoredSignKey, base64ToArrayBuffer(spk.publicKeyBase64));
+
+      const opks = [];
+      const opksPrivate = [];
+      for (let i = 0; i < 20; i++) {
+        const key = await generateX25519KeyPair();
+        opks.push({ publicKey: key.publicKeyBase64 });
+        opksPrivate.push(key);
+      }
+
+      await api.post('/api/users/prekeys', {
+        signedPreKey: {
+          publicKey: spk.publicKeyBase64,
+          signature: spkSignature
+        },
+        oneTimePreKeys: opks
+      });
+
+      // Save the new SPK and OPKs locally
+      await saveKey(`spk_priv_${user.id}`, spk.privateKey);
+      for (let i = 0; i < opksPrivate.length; i++) {
+        await saveKey(`opk_priv_${user.id}_${opks[i].publicKey}`, opksPrivate[i].privateKey);
+      }
       
-      await completePinRestore(finalNonExtractablePrivateKey);
+      // We pass both keys to context or just complete
+      await completePinRestore({ sign: restoredSignKey, dh: restoredDhKey });
     } catch (err) {
       console.error(err);
-      setError('Mã PIN không chính xác hoặc dữ liệu khôi phục hỏng.');
+      setError('Incorrect PIN or corrupted backup data.');
     } finally {
       setLoading(false);
     }

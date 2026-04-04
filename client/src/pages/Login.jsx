@@ -102,6 +102,23 @@ const Login = () => {
               Tạo khóa ngay
             </Link>
           </p>
+          <div className="mt-8 pt-6 border-t border-gray-200 dark:border-white/10 text-center">
+            <button
+              type="button"
+              onClick={async () => {
+                if (window.confirm('CẢNH BÁO: Hành động này sẽ xóa sạch TOÀN BỘ khóa bí mật trên trình duyệt này. Bạn sẽ không thể giải mã tin nhắn cũ nếu không có bản sao lưu. Tiếp tục?')) {
+                  localStorage.clear();
+                  sessionStorage.clear();
+                  const dbs = await window.indexedDB.databases();
+                  dbs.forEach(db => window.indexedDB.deleteDatabase(db.name));
+                  window.location.reload();
+                }
+              }}
+              className="text-xs text-red-500/60 hover:text-red-500 transition-colors uppercase tracking-wider font-bold"
+            >
+              Thiết lập lại toàn bộ dữ liệu (Wipe Data)
+            </button>
+          </div>
         </form>
       </div>
     </div>

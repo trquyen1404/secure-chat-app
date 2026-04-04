@@ -17,11 +17,21 @@ const validate = (schema) => (req, res, next) => {
   }
 };
 
-// Schemas
+// X25519/Ed25519 base64 key: typically 44 chars for 32-byte raw key
+const base64Key = z.string().min(20, 'Key too short').max(512, 'Key too large');
+
 const registerSchema = z.object({
-  username: z.string().min(3, "Username must be at least 3 characters").max(50, "Username must be at most 50 characters"),
-  password: z.string().min(8, "Password must be at least 8 characters").regex(/[A-Z]/, "Password must contain at least one uppercase letter").regex(/[0-9]/, "Password must contain at least one number"),
-  publicKey: z.string().startsWith('-----BEGIN PUBLIC KEY-----', "Invalid public key format").endsWith('-----END PUBLIC KEY-----', "Invalid public key format"),
+  username: z.string().min(3, 'Username must be at least 3 characters').max(50),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  publicKey: base64Key,                     // ECDSA Identity Key (base64 SPKI)
+  dhPublicKey: base64Key,                   // X25519 Identity DH Key (base64 Raw)
+  signedPreKey: z.object({
+    publicKey: base64Key,                   // X25519 SPK public key (base64)
+    signature: z.string().min(10),          // Ed25519 signature (base64)
+  }),
+  oneTimePreKeys: z.array(z.object({
+    publicKey: base64Key,
+  })).optional(),
   encryptedPrivateKey: z.string().optional(),
   keyBackupSalt: z.string().optional(),
   keyBackupIv: z.string().optional(),

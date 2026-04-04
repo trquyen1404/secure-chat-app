@@ -11,7 +11,6 @@ const sequelize = require('./config/database');
 
 dotenv.config();
 
-// --- Environment validation ---
 if (!process.env.JWT_SECRET) {
   console.error('FATAL: JWT_SECRET environment variable is not set. Refusing to start.');
   process.exit(1);
@@ -20,9 +19,8 @@ if (!process.env.JWT_SECRET) {
 const app = express();
 const server = http.createServer(app);
 
-// --- Security Headers (helmet) ---
 app.use(helmet({
-  crossOriginEmbedderPolicy: false, // needed for WebRTC & media blobs
+  crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -35,11 +33,9 @@ app.use(helmet({
   },
 }));
 
-// --- CORS (whitelist from .env) ---
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',');
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., curl, Postman) only in development
     if (!origin && process.env.NODE_ENV !== 'production') return callback(null, true);
     if (origin && ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
     callback(new Error(`CORS policy violation: origin '${origin}' not allowed`));
@@ -47,30 +43,25 @@ app.use(cors({
   credentials: true,
 }));
 
-// --- Body Parsing ---
 app.use(cookieParser());
-app.use(express.json({ limit: '10mb' })); // cap body size; image data URLs need headroom
+app.use(express.json({ limit: '10mb' }));
 
-// --- Rate Limiting ---
-// General limiter for all API routes
 app.use('/api', rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200,
+  windowMs: 1 * 60 * 1000,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau 15 phút.' },
+  message: { error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau 1 phút.' },
 }));
 
-// Strict limiter for auth endpoints (anti brute-force)
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 15, // 15 attempts per 15 min
+  windowMs: 1 * 60 * 1000,
+  max: 200, 
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Quá nhiều lần đăng nhập. Vui lòng thử lại sau 15 phút.' },
+  message: { error: 'Quá nhiều lần đăng nhập. Vui lòng thử lại sau.' },
 });
 
-// --- Routes ---
 app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/friends', require('./routes/friendRoutes'));
@@ -79,16 +70,13 @@ app.use('/api/messages', require('./routes/messageRoutes'));
 app.use('/api/stories', require('./routes/storyRoutes'));
 app.use('/api/push', require('./routes/pushRoutes'));
 
-// Root endpoint for testing
 app.get('/', (req, res) => res.send('Secure Chat API running'));
 
-// --- Global Error Handler ---
 app.use((err, req, res, next) => {
   console.error('[Error]', err.message);
   res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
 });
 
-// --- Socket.IO ---
 const io = new Server(server, {
   cors: {
     origin: ALLOWED_ORIGINS,
@@ -98,12 +86,7 @@ const io = new Server(server, {
 });
 socketService(io);
 
-// --- Database ---
-const syncOptions = process.env.NODE_ENV === 'production'
-  ? {} // Do NOT alter schema in production — use migrations
-  : { alter: true };
-
-sequelize.sync(syncOptions)
+sequelize.sync({})
   .then(() => console.log(`PostgreSQL synced (mode: ${process.env.NODE_ENV || 'development'})`))
   .catch(err => { console.error('Database sync error:', err); process.exit(1); });
 

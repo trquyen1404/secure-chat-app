@@ -1,12 +1,5 @@
 /**
- * keyStore.js — IndexedDB-based storage for non-extractable CryptoKey objects.
- *
- * Why IndexedDB instead of localStorage?
- * - CryptoKey objects (with extractable: false) cannot be serialised to a string,
- *   so localStorage is not an option.
- * - IndexedDB can store structured cloneables, which includes CryptoKey objects.
- * - A non-extractable key NEVER exists as plain text in JavaScript memory,
- *   making it immune to XSS-based key theft.
+ * keyStore.js — IndexedDB storage for non-extractable CryptoKey objects.
  */
 
 const DB_NAME = 'SecureChatKeyStore';
@@ -54,7 +47,29 @@ export async function deleteKey(keyId) {
   });
 }
 
+export async function clearKeyStore() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => {
+      console.log(`[KeyStore] Database ${DB_NAME} deleted successfully.`);
+      resolve();
+    };
+    req.onerror = (e) => {
+      console.error(`[KeyStore] Failed to delete database ${DB_NAME}:`, e.target.error);
+      reject(e.target.error);
+    };
+    req.onblocked = () => {
+      console.warn(`[KeyStore] Deletion of ${DB_NAME} is blocked. Close other tabs.`);
+      resolve(); // Proceed anyway, or handle as needed
+    };
+  });
+}
+
 export async function hasKey(keyId) {
   const key = await loadKey(keyId);
   return key !== null;
 }
+
+// Aliases for consistency across components
+export const getKey = loadKey;
+export const setKey = saveKey;
