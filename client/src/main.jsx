@@ -8,7 +8,6 @@ import { SocketProvider } from './context/SocketContext.jsx';
 import { CallProvider } from './context/CallContext.jsx';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
         <SocketProvider>
@@ -18,5 +17,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         </SocketProvider>
       </AuthProvider>
     </ThemeProvider>
-  </React.StrictMode>
 );

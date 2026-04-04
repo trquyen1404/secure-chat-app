@@ -3,7 +3,6 @@ const sequelize = require('../config/database');
 const Group = require('./Group');
 const GroupMember = require('./GroupMember');
 
-
 const User = sequelize.define('User', {
   id: {
     type: DataTypes.UUID,
@@ -20,6 +19,10 @@ const User = sequelize.define('User', {
     allowNull: false,
   },
   publicKey: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+  },
+  dhPublicKey: {
     type: DataTypes.TEXT,
     allowNull: false,
   },

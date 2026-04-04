@@ -1,9 +1,9 @@
 const User = require('../models/User');
+const PreKey = require('../models/PreKey');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { createPublicKey } = require('crypto');
 
-const JWT_SECRET = process.env.JWT_SECRET; // Guaranteed set by server.js startup check
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '15m'; // Short-lived Access Token
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || JWT_SECRET + '_refresh';
 const JWT_REFRESH_EXPIRES = '7d';
@@ -19,52 +19,73 @@ const setRefreshTokenCookie = (res, token) => {
 
 exports.register = async (req, res) => {
   try {
-    const { username, password, publicKey, encryptedPrivateKey, keyBackupSalt, keyBackupIv } = req.body;
+    const { 
+      username, 
+      password, 
+      publicKey, // This is now X25519 Identity Key
+      signedPreKey, 
+      oneTimePreKeys,
+      encryptedPrivateKey, 
+      keyBackupSalt, 
+      keyBackupIv,
+      dhPublicKey
+    } = req.body;
 
     // --- Input Validation ---
-    if (!username || typeof username !== 'string' || username.length < 3 || username.length > 50) {
-      return res.status(400).json({ error: 'Username phải có từ 3–50 ký tự' });
+    if (!username || typeof username !== 'string' || username.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
     }
 
-    // Password strength validation
-    const passwordErrors = [];
-    if (!password || typeof password !== 'string') {
-      passwordErrors.push('Mật khẩu không được để trống');
-    } else {
-      if (password.length < 8)         passwordErrors.push('Mật khẩu phải có ít nhất 8 ký tự');
-      if (!/[A-Z]/.test(password))     passwordErrors.push('Mật khẩu phải có ít nhất 1 chữ cái viết HOA');
-      if (!/[a-z]/.test(password))     passwordErrors.push('Mật khẩu phải có ít nhất 1 chữ cái viết thường');
-      if (!/[0-9]/.test(password))     passwordErrors.push('Mật khẩu phải có ít nhất 1 chữ số');
-      if (/\s/.test(password))         passwordErrors.push('Mật khẩu không được chứa dấu cách');
-    }
-    if (passwordErrors.length > 0) {
-      return res.status(400).json({ error: passwordErrors.join('. ') });
-    }
     if (!publicKey || typeof publicKey !== 'string') {
-      return res.status(400).json({ error: 'Public key is required' });
+      return res.status(400).json({ error: 'Identity Public key is required' });
     }
 
-    // --- Validate RSA Public Key format ---
-    try {
-      createPublicKey({ key: publicKey, format: 'pem', type: 'spki' });
-    } catch {
-      return res.status(400).json({ error: 'Invalid public key format' });
+    if (!dhPublicKey || typeof dhPublicKey !== 'string') {
+      return res.status(400).json({ error: 'DH Public key is required' });
+    }
+
+    if (!signedPreKey || !signedPreKey.publicKey || !signedPreKey.signature) {
+      return res.status(400).json({ error: 'Signed PreKey and signature are required' });
     }
 
     const existingUser = await User.findOne({ where: { username } });
     if (existingUser) {
-      return res.status(400).json({ error: 'Username đã tồn tại' });
+      return res.status(409).json({ error: 'Username already exists' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12); // Increased cost factor
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-    const user = await User.create({ 
-      username, 
-      password: hashedPassword, 
-      publicKey,
-      encryptedPrivateKey: encryptedPrivateKey || null,
-      keyBackupSalt: keyBackupSalt || null,
-      keyBackupIv: keyBackupIv || null
+    // Create user and its prekeys in a transaction
+    const user = await User.sequelize.transaction(async (t) => {
+      const newUser = await User.create({ 
+        username, 
+        password: hashedPassword, 
+        publicKey,
+        dhPublicKey,
+        encryptedPrivateKey: encryptedPrivateKey || null,
+        keyBackupSalt: keyBackupSalt || null,
+        keyBackupIv: keyBackupIv || null
+      }, { transaction: t });
+
+      // Save Signed PreKey
+      await PreKey.create({
+        userId: newUser.id,
+        publicKey: signedPreKey.publicKey,
+        signature: signedPreKey.signature,
+        type: 'signed'
+      }, { transaction: t });
+
+      // Save One-Time PreKeys
+      if (Array.isArray(oneTimePreKeys)) {
+        const opkData = oneTimePreKeys.map(k => ({
+          userId: newUser.id,
+          publicKey: k.publicKey,
+          type: 'one-time'
+        }));
+        await PreKey.bulkCreate(opkData, { transaction: t });
+      }
+
+      return newUser;
     });
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -76,9 +97,12 @@ exports.register = async (req, res) => {
 
     setRefreshTokenCookie(res, refreshToken);
 
+    const activeSPK = await PreKey.findOne({ where: { userId: user.id, type: 'signed' }, order: [['createdAt', 'DESC']] });
+
     res.status(201).json({ 
       user: { 
         id: user.id, username: user.username, publicKey: user.publicKey,
+        signedPreKey: activeSPK ? activeSPK.publicKey : null,
         encryptedPrivateKey: user.encryptedPrivateKey,
         keyBackupSalt: user.keyBackupSalt,
         keyBackupIv: user.keyBackupIv
@@ -87,7 +111,7 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     console.error('[register]', error);
-    res.status(500).json({ error: 'Đăng ký thất bại' });
+    res.status(500).json({ error: 'Registration failed' });
   }
 };
 
@@ -117,9 +141,12 @@ exports.login = async (req, res) => {
 
     setRefreshTokenCookie(res, refreshToken);
 
+    const activeSPK = await PreKey.findOne({ where: { userId: user.id, type: 'signed' }, order: [['createdAt', 'DESC']] });
+
     res.json({ 
       user: { 
         id: user.id, username: user.username, publicKey: user.publicKey,
+        signedPreKey: activeSPK ? activeSPK.publicKey : null,
         encryptedPrivateKey: user.encryptedPrivateKey,
         keyBackupSalt: user.keyBackupSalt,
         keyBackupIv: user.keyBackupIv

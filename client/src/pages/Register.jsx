@@ -1,8 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../utils/axiosConfig';
-import { generateRSAKeyPair, wrapPrivateKeyWithPIN } from '../utils/crypto';
-import { saveKey } from '../utils/keyStore';
+import { 
+  generateX25519KeyPair,
+  generateECDSAKeyPair,
+  signDataECDSA,
+  wrapIdentityBundleWithPIN,
+  base64ToArrayBuffer 
+} from '../utils/crypto';
+import { setKey, getKey } from '../utils/keyStore';
 import { useAuth } from '../context/AuthContext';
 import { ShieldCheck, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -83,41 +89,76 @@ const Register = () => {
       return;
     }
 
+    if (loading) return;
+
+    // Check for existing keys to prevent duplicates (Singleton Pattern)
+    const hasExistingIdentity = await getKey('local_identity_initialized');
+    if (hasExistingIdentity) {
+      console.warn('[Registration] Identity already exists on this device. Re-using existing keys if possible, or clear site data to reset.');
+      // For now, we allow them to proceed but log it. 
+      // In a real app we might redirect to Login or use existing keys.
+    }
+
     setLoading(true);
     try {
-      // 1. Generate RSA-4096 key pair via Web Crypto API (temporarily extractable)
-      const { publicKeyPem, privateKey } = await generateRSAKeyPair();
+      // 1. Generate Identity Keys in RAM (Memory-first)
+      console.log('[Registration] Generating new cryptographic bundle...');
+      const ikSign = await generateECDSAKeyPair();
+      const ikDh = await generateX25519KeyPair();
+      const spk = await generateX25519KeyPair();
 
-      // 2. Wrap the private key with the user's PIN
-      const {
-        encryptedPrivateKeyB64,
-        keyBackupSaltB64,
-        keyBackupIvB64,
-        finalNonExtractablePrivateKey,
-      } = await wrapPrivateKeyWithPIN(privateKey, pin);
+      // Sign SPK
+      const spkSignature = await signDataECDSA(ikSign.privateKey, base64ToArrayBuffer(spk.publicKeyBase64));
 
-      // 3. Send the public key and the wrapped backup data to the server
+      // Generate OPKs
+      const opks = [];
+      const opksPrivate = [];
+      for (let i = 0; i < 20; i++) {
+        const key = await generateX25519KeyPair();
+        opks.push({ publicKey: key.publicKeyBase64 });
+        opksPrivate.push(key);
+      }
+
+      // 2. Wrap Identity Keys
+      const { wrappedKeyB64, saltB64, ivB64 } = await wrapIdentityBundleWithPIN(ikSign.privateKey, ikDh.privateKey, pin);
+
+      // 3. Register on Server
       const res = await authApi.register({
         username,
         password,
-        publicKey: publicKeyPem,
-        encryptedPrivateKey: encryptedPrivateKeyB64,
-        keyBackupSalt: keyBackupSaltB64,
-        keyBackupIv: keyBackupIvB64,
+        publicKey: ikSign.publicKeyBase64,
+        dhPublicKey: ikDh.publicKeyBase64,
+        signedPreKey: {
+          publicKey: spk.publicKeyBase64,
+          signature: spkSignature
+        },
+        oneTimePreKeys: opks,
+        encryptedPrivateKey: wrappedKeyB64,
+        keyBackupSalt: saltB64,
+        keyBackupIv: ivB64
       });
 
-      // 4. Store the strictly NON-EXTRACTABLE private key in IndexedDB
-      await saveKey(`privateKey_${res.data.user.id}`, finalNonExtractablePrivateKey);
+      const userId = res.data.user.id;
 
-      login(res.data);
-      navigate('/');
-    } catch (err) {
-      const resData = err.response?.data;
-      if (resData?.details && Array.isArray(resData.details)) {
-        setError(resData.details.map((d) => d.message).join(' | '));
-      } else {
-        setError(resData?.error || err.message || 'Đăng ký thất bại');
+      // 4. Save to IndexedDB (Only after server success)
+      const lowerUsername = username.toLowerCase();
+      await setKey(`ik_sign_priv_${lowerUsername}`, ikSign.privateKey);
+      await setKey(`ik_dh_priv_${lowerUsername}`, ikDh.privateKey);
+      await setKey(`spk_priv_${lowerUsername}`, spk.privateKey);
+
+      for (let i = 0; i < opksPrivate.length; i++) {
+        await setKey(`opk_priv_${lowerUsername}_${opks[i].publicKey}`, opksPrivate[i].privateKey);
       }
+
+      // Mark this device as having an initialized identity
+      await setKey('local_identity_initialized', true);
+      localStorage.setItem('hasIdentity', 'true'); // redundantly sync for easy checks
+
+      console.log('[Registration] Keys successfully persisted to IndexedDB.');
+      navigate('/login');
+    } catch (err) {
+      console.error('[Registration] Error during key generation or upload:', err);
+      setError(err.response?.data?.error || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
