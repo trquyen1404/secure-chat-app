@@ -73,8 +73,11 @@ const authLimiter = rateLimit({
 // --- Routes ---
 app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/friends', require('./routes/friendRoutes'));
 app.use('/api/groups', require('./routes/groupRoutes'));
 app.use('/api/messages', require('./routes/messageRoutes'));
+app.use('/api/stories', require('./routes/storyRoutes'));
+app.use('/api/push', require('./routes/pushRoutes'));
 
 // Root endpoint for testing
 app.get('/', (req, res) => res.send('Secure Chat API running'));

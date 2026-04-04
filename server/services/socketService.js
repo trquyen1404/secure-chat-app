@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Message = require('../models/Message');
+const webpush = require('web-push');
 const { Op } = require('sequelize');
 
 const JWT_SECRET = process.env.JWT_SECRET; // Guaranteed set by server.js startup check
@@ -54,7 +55,7 @@ module.exports = (io) => {
     // ── Direct Message ──────────────────────────────────────────────
     socket.on('sendMessage', async (data) => {
       try {
-        const { recipientId, encryptedContent, encryptedAesKeyForSender, encryptedAesKeyForRecipient, iv, replyToId } = data;
+        const { recipientId, encryptedContent, encryptedAesKeyForSender, encryptedAesKeyForRecipient, iv, replyToId, expiresInSeconds } = data;
 
         if (!recipientId || !encryptedContent || !encryptedAesKeyForRecipient || !iv) {
           return socket.emit('error', { message: 'Dữ liệu tin nhắn không hợp lệ' });
@@ -68,6 +69,7 @@ module.exports = (io) => {
           encryptedAesKeyForRecipient,
           iv,
           replyToId: replyToId || null,
+          expiresInSeconds: expiresInSeconds || null,
         });
 
         const messageData = {
@@ -79,6 +81,7 @@ module.exports = (io) => {
           encryptedAesKeyForRecipient,
           iv,
           replyToId: replyToId || null,
+          expiresInSeconds: expiresInSeconds || null,
           isDeleted: false,
           reactions: {},
           readAt: null,
@@ -90,6 +93,21 @@ module.exports = (io) => {
         const recipientSocketId = userSockets.get(recipientId);
         if (recipientSocketId) {
           io.to(recipientSocketId).emit('newMessage', messageData);
+        } else {
+          // User is offline, trigger push notification
+          try {
+             const recipient = await User.findByPk(recipientId);
+             if (recipient && recipient.webPushSubscription) {
+                const payload = JSON.stringify({
+                   title: 'Tin nhắn mới từ hệ thống bảo mật',
+                   body: 'Bạn có một tin nhắn mới đang chờ giải mã.',
+                   url: '/'
+                });
+                await webpush.sendNotification(recipient.webPushSubscription, payload);
+             }
+          } catch (pushErr) {
+             console.error('[web-push] Send notification failed:', pushErr);
+          }
         }
       } catch (error) {
         console.error('[socket] sendMessage error:', error);
@@ -165,6 +183,49 @@ module.exports = (io) => {
         if (senderSocketId) {
           io.to(senderSocketId).emit('messagesRead', { byUserId: socket.userId });
         }
+
+        // --- Self Destruction Logic ---
+        // Find any newly read messages that have expiresInSeconds
+        const updatedMessages = await Message.findAll({
+          where: { senderId, recipientId: socket.userId, expiresInSeconds: { [Op.not]: null } }
+        });
+
+        updatedMessages.forEach(msg => {
+          // If it just got read (or was already read, doesn't matter, we fire a timeout)
+          // Ideally we calculate time remaining, but for simplicity we assume it starts now if it was just marked read.
+          // In a real production system, a Cron job scanning all readAt + expiresInSeconds is better.
+          const timeElapsed = new Date() - new Date(msg.readAt);
+          const timeLeft = (msg.expiresInSeconds * 1000) - timeElapsed;
+
+          if (timeLeft > 0) {
+            setTimeout(async () => {
+               await msg.update({
+                  isDeleted: true,
+                  encryptedContent: null,
+                  encryptedAesKeyForSender: null,
+                  encryptedAesKeyForRecipient: null,
+                  iv: null,
+               });
+               const payload = { messageId: msg.id, isDeleted: true };
+               io.to(`user:${socket.userId}`).emit('messageDeleted', payload);
+               io.to(`user:${senderId}`).emit('messageDeleted', payload);
+            }, timeLeft);
+          } else {
+             // already expired
+             msg.update({
+                  isDeleted: true,
+                  encryptedContent: null,
+                  encryptedAesKeyForSender: null,
+                  encryptedAesKeyForRecipient: null,
+                  iv: null,
+             }).then(() => {
+               const payload = { messageId: msg.id, isDeleted: true };
+               io.to(`user:${socket.userId}`).emit('messageDeleted', payload);
+               io.to(`user:${senderId}`).emit('messageDeleted', payload);
+             });
+          }
+        });
+        
       } catch (err) {
         console.error('[socket] markAsRead error:', err);
       }

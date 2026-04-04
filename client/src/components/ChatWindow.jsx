@@ -5,13 +5,18 @@ import { useSocket } from '../context/SocketContext';
 import { useCall } from '../context/CallContext';
 import { generateAESKey, encryptMessageAES, encryptKeyRSA, decryptKeyRSA, decryptMessageAES } from '../utils/crypto';
 import MessageBubble from './MessageBubble';
-import { Send, Lock, Loader2, ArrowLeft, ShieldCheck, ImagePlus, Paperclip, Mic, MicOff, Disc2, Trash2, Phone, Video, CornerUpLeft, X } from 'lucide-react';
+import { Send, Lock, Loader2, ArrowLeft, ShieldCheck, ImagePlus, Paperclip, Mic, MicOff, Disc2, Trash2, Phone, Video, CornerUpLeft, X, Search, Timer } from 'lucide-react';
+import UserProfileModal from './UserProfileModal';
 
 const ChatWindow = ({ user: chatUser, onClose }) => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [expiresIn, setExpiresIn] = useState(null);
   
   // Pagination States
   const [hasMore, setHasMore] = useState(true);
@@ -243,8 +248,10 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         encryptedAesKeyForRecipient,
         iv: ivB64,
         replyToId: replyMessage ? replyMessage.id : null,
+        expiresInSeconds: expiresIn,
       });
       setReplyMessage(null);
+      setExpiresIn(null);
     } catch (error) {
       console.error('Encryption error', error);
       alert('Không thể gửi tin mã hóa: ' + error.message);
@@ -380,6 +387,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
   return (
     <div className="flex-1 flex flex-col bg-white dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800 relative z-10 w-full transition-colors duration-300">
+      {showUserProfile && <UserProfileModal userId={chatUser.id} onClose={() => setShowUserProfile(false)} />}
       <div className="absolute inset-0 dark:bg-gradient-to-b dark:from-slate-900 dark:via-slate-900/90 dark:to-slate-950 pointer-events-none transition-colors duration-300"></div>
 
       {/* Header */}
@@ -389,24 +397,33 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
             <ArrowLeft className="w-5 h-5" />
           </button>
           
-          <div className="relative">
-            <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex justify-center items-center text-white font-bold text-lg shadow-lg shadow-purple-500/20">
-              {chatUser.username.charAt(0).toUpperCase()}
+          <button onClick={() => setShowUserProfile(true)} className="flex items-center gap-3 text-left group">
+            <div className="relative">
+              <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex justify-center items-center text-white font-bold text-lg shadow-lg shadow-purple-500/20 group-hover:shadow-indigo-500/40 transition-shadow">
+                {chatUser.username.charAt(0).toUpperCase()}
+              </div>
+              {isOnline && (
+                <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-[2.5px] border-white dark:border-slate-900 rounded-full"></div>
+              )}
             </div>
-            {isOnline && (
-              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-[2.5px] border-white dark:border-slate-900 rounded-full"></div>
-            )}
-          </div>
-          <div>
-            <h2 className="font-semibold text-gray-800 dark:text-slate-100 text-[15px] transition-colors">{chatUser.username}</h2>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-               <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-               Mã hoá đầu cuối (E2EE)
+            <div>
+              <h2 className="font-semibold text-gray-800 dark:text-slate-100 text-[15px] group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{chatUser.username}</h2>
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                 <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                 Xem hồ sơ cá nhân
+              </div>
             </div>
-          </div>
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
+          <button 
+             onClick={() => setShowSearch(!showSearch)} 
+             className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${showSearch ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
+             title="Tìm kiếm tin nhắn"
+          >
+             <Search className="w-5 h-5" />
+          </button>
           <button 
              onClick={() => callUser(chatUser.id, false)} 
              className="w-10 h-10 rounded-full flex items-center justify-center text-indigo-500 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
@@ -423,6 +440,47 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           </button>
         </div>
       </div>
+
+      {/* Search Bar Dropdown */}
+      {showSearch && (
+        <div className="absolute top-[72px] left-0 right-0 z-20 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 p-3 shadow-md animate-fade-in-up">
+           <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input 
+                type="text" 
+                autoFocus
+                placeholder="Tìm kiếm nội dung đã được giải mã..." 
+                className="w-full bg-gray-100 dark:bg-slate-800 border border-transparent focus:border-indigo-500 rounded-xl py-2 pl-9 pr-10 outline-none text-sm text-gray-800 dark:text-slate-200"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+           </div>
+           
+           {/* If searched, we can show a quick list or highlight the main chat. Doing a quick list overlay: */}
+           {searchQuery && (
+              <div className="max-h-64 overflow-y-auto mt-2 bg-gray-50 dark:bg-slate-800/50 rounded-xl border border-gray-100 dark:border-slate-700/50 custom-scrollbar">
+                {messages.filter(m => m.decryptedContent && m.decryptedContent.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
+                   <div key={`search-${m.id}`} className="p-3 border-b border-gray-200 dark:border-slate-700/50 last:border-0 hover:bg-white dark:hover:bg-slate-800 transition cursor-pointer" onClick={() => {
+                      // basic quick jump feature: not fully implemented, just clears search 
+                      setShowSearch(false);
+                      setSearchQuery('');
+                   }}>
+                      <div className="text-xs text-gray-500 mb-1">{m.senderId === currentUser.id ? 'Bạn' : chatUser.username} • {new Date(m.createdAt).toLocaleTimeString()}</div>
+                      <div className="text-sm text-gray-800 dark:text-slate-200 truncate">{m.decryptedContent}</div>
+                   </div>
+                ))}
+                {messages.filter(m => m.decryptedContent && m.decryptedContent.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                   <div className="p-4 text-center text-sm text-gray-500">Không tìm thấy kết quả.</div>
+                )}
+              </div>
+           )}
+        </div>
+      )}
 
       {/* Messages Area */}
       <div 
@@ -530,6 +588,15 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
                 title="Bắt đầu Ghi Âm Tệp E2EE"
               >
                 <Mic className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setExpiresIn(prev => prev === null ? 30 : prev === 30 ? 60 : prev === 60 ? 300 : null)}
+                className={`p-2.5 bg-transparent rounded-full transition-colors shrink-0 relative ${expiresIn ? 'text-amber-500 hover:bg-amber-500/10' : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'}`}
+                title={expiresIn ? `Tin nhắn sẽ tự hủy sau ${expiresIn} giây` : 'Bật tin nhắn tự huỷ'}
+              >
+                <Timer className="w-5 h-5" />
+                {expiresIn && <span className="absolute top-1 right-0 text-[10px] font-bold bg-amber-500 text-white rounded-full px-1 py-0 shadow">{expiresIn}s</span>}
               </button>
             </div>
           )}

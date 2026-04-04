@@ -55,6 +55,26 @@ const User = sequelize.define('User', {
     type: DataTypes.INTEGER,
     defaultValue: 0,
   },
+  fullName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  bio: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  phoneNumber: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  profilePrivacy: {
+    type: DataTypes.ENUM('public', 'friends', 'private'),
+    defaultValue: 'public',
+  },
+  webPushSubscription: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  }
 }, {
   timestamps: true,
 });
