@@ -1,22 +1,95 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
+import PinLock from '../components/PinLock';
+import { useAuth } from '../context/AuthContext';
 
 const ChatApp = () => {
+  const { user } = useAuth();
+  
   const [selectedUser, setSelectedUser] = useState(null);
+  
+  // App Lock states
+  const [hasPinSetup, setHasPinSetup] = useState(true); // default true to prevent flickering
+  const [isAppUnlocked, setIsAppUnlocked] = useState(false);
+  
+  // Chat Lock states
+  const [chatUnlockedFor, setChatUnlockedFor] = useState(null); // stores user ID that is unlocked
+
+  useEffect(() => {
+    if (user) {
+      const storedPin = localStorage.getItem(`app_pin_${user.id}`);
+      if (storedPin) {
+        setHasPinSetup(true);
+        setIsAppUnlocked(false);
+      } else {
+        setHasPinSetup(false);
+        setIsAppUnlocked(false);
+      }
+    }
+  }, [user]);
+
+  const handleSelectUser = (u) => {
+    if (selectedUser?.id !== u.id) {
+       setSelectedUser(u);
+       setChatUnlockedFor(null); // lock again for new user
+    }
+  };
+
+  const handleAppUnlockSuccess = () => {
+    setIsAppUnlocked(true);
+  };
+
+  const handleAppSetupSuccess = () => {
+    setHasPinSetup(true);
+    setIsAppUnlocked(true);
+  };
+
+  const handleChatUnlockSuccess = () => {
+    setChatUnlockedFor(selectedUser.id);
+  };
+
+  const handleCancelChatLock = () => {
+    setSelectedUser(null);
+    setChatUnlockedFor(null);
+  };
+
+  if (!user) return null;
 
   return (
-    <div className="h-screen w-screen flex bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-200 overflow-hidden transition-colors duration-500">
+    <div className="h-screen w-screen flex bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-200 overflow-hidden relative transition-colors duration-500">
+      
+      {/* 1. App Level Lock: Show full screen PinLock if app is not unlocked */}
+      {!isAppUnlocked && !hasPinSetup && (
+        <PinLock userId={user.id} mode="setup" onSuccess={handleAppSetupSuccess} />
+      )}
+      {!isAppUnlocked && hasPinSetup && (
+        <PinLock userId={user.id} mode="verifyApp" onSuccess={handleAppUnlockSuccess} />
+      )}
+
+      {/* 2. Main App: Only visible properly if unlocked (or partially behind backdrop) */}
       <Sidebar 
         selectedUser={selectedUser} 
-        onSelectUser={setSelectedUser} 
+        onSelectUser={handleSelectUser} 
       />
       
       {selectedUser ? (
-        <ChatWindow 
-          user={selectedUser} 
-          onClose={() => setSelectedUser(null)}
-        />
+        <div className="flex-1 relative flex">
+          {chatUnlockedFor === selectedUser.id ? (
+            <ChatWindow 
+              user={selectedUser} 
+              onClose={() => { setSelectedUser(null); setChatUnlockedFor(null); }}
+            />
+          ) : (
+            <PinLock 
+              userId={user.id} 
+              mode="verifyChat" 
+              chatTarget={selectedUser} 
+              onSuccess={handleChatUnlockSuccess} 
+              onCancel={handleCancelChatLock}
+            />
+          )}
+        </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800/50 transition-colors duration-500">
           <div className="w-24 h-24 mb-6 rounded-full bg-slate-200 dark:bg-slate-800/50 flex items-center justify-center shadow-inner transition-colors">
