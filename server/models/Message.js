@@ -1,6 +1,6 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User'); // need to import User for association
+const User = require('./User');
 
 const Message = sequelize.define('Message', {
   id: {
@@ -11,28 +11,36 @@ const Message = sequelize.define('Message', {
   senderId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: {
-      model: User,
-      key: 'id'
-    }
+    references: { model: User, key: 'id' }
   },
   recipientId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: {
-      model: User,
-      key: 'id'
-    }
+    references: { model: User, key: 'id' }
   },
   encryptedContent: {
     type: DataTypes.TEXT,
-    allowNull: true, // Allow true because if deleted, we might wipe it
+    allowNull: true,
   },
-  encryptedAesKeyForSender: {
+  ratchetKey: {
     type: DataTypes.TEXT,
     allowNull: true,
   },
-  encryptedAesKeyForRecipient: {
+  n: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
+  pn: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
+  senderEk: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  usedOpk: {
     type: DataTypes.TEXT,
     allowNull: true,
   },
@@ -69,21 +77,23 @@ const Message = sequelize.define('Message', {
     type: DataTypes.DATE,
     allowNull: true,
   },
-  deliveredAt: {
-    type: DataTypes.DATE,
+  expiresInSeconds: {
+    type: DataTypes.INTEGER,
     allowNull: true,
   }
 }, {
-  timestamps: true, 
+  timestamps: true,
+  indexes: [
+    { fields: ['senderId', 'recipientId'] },
+    { fields: ['recipientId', 'senderId'] },
+    { fields: ['createdAt'] }
+  ]
 });
 
-// Relationships
 User.hasMany(Message, { as: 'SentMessages', foreignKey: 'senderId' });
 User.hasMany(Message, { as: 'ReceivedMessages', foreignKey: 'recipientId' });
 Message.belongsTo(User, { as: 'Sender', foreignKey: 'senderId' });
 Message.belongsTo(User, { as: 'Recipient', foreignKey: 'recipientId' });
-
-// Self-referencing relationship for Replies
 Message.hasMany(Message, { as: 'Replies', foreignKey: 'replyToId' });
 Message.belongsTo(Message, { as: 'ReplyTo', foreignKey: 'replyToId' });
 

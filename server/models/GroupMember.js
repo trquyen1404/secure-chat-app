@@ -25,14 +25,18 @@ const GroupMember = sequelize.define('GroupMember', {
       key: 'id',
     },
   },
-  encryptedGroupKey: {
-    type: DataTypes.TEXT,
-    allowNull: false,
+  role: {
+    type: DataTypes.STRING,
+    defaultValue: 'member',
   },
 }, {
   timestamps: true,
+  indexes: [
+    {
+      unique: true,
+      fields: ['groupId', 'userId']
+    }
+  ]
 });
-
-
 
 module.exports = GroupMember;

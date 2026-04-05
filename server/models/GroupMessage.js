@@ -27,11 +27,25 @@ const GroupMessage = sequelize.define('GroupMessage', {
     type: DataTypes.TEXT,
     allowNull: true,
   },
-  encryptedAesKeyForSender: {
+  ratchetKey: {
     type: DataTypes.TEXT,
     allowNull: true,
   },
-  encryptedAesKeyForRecipient: {
+  n: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
+  pn: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
+  senderEk: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  usedOpk: {
     type: DataTypes.TEXT,
     allowNull: true,
   },
@@ -70,6 +84,14 @@ const GroupMessage = sequelize.define('GroupMessage', {
   },
 }, {
   timestamps: true,
+  indexes: [
+    {
+      fields: ['groupId']
+    },
+    {
+      fields: ['createdAt']
+    }
+  ]
 });
 
 module.exports = GroupMessage;

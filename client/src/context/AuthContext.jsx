@@ -1,4 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
+import { loadKey, deleteKey } from '../utils/keyStore';
+import { authApi } from '../utils/axiosConfig';
 
 const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
@@ -6,45 +8,97 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token') || null);
-  const [privateKey, setPrivateKey] = useState(null);
+  const [identityKeys, setIdentityKeys] = useState(null);
+  const [needsPinRestore, setNeedsPinRestore] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (token) {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
-        const pk = localStorage.getItem(`privateKey_${parsedUser.id}`);
-        if (pk) setPrivateKey(pk);
+    const init = async () => {
+      if (token) {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+          const lowerUsername = parsedUser.username.toLowerCase();
+          const pkSign = await loadKey(`ik_sign_priv_${lowerUsername}`);
+          const pkDh = await loadKey(`ik_dh_priv_${lowerUsername}`);
+          if (pkSign && pkDh) {
+            setIdentityKeys({ sign: pkSign, dh: pkDh });
+            setNeedsPinRestore(false);
+          } else {
+            setNeedsPinRestore(true);
+          }
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+    init();
   }, [token]);
 
-  const login = (data) => {
+  const login = async (data) => {
     setToken(data.token);
     setUser(data.user);
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data.user));
-    
-    // Check if we already have the generated key in localStorage for this specific user
-    const storedPk = localStorage.getItem(`privateKey_${data.user.id}`);
-    if (storedPk) {
-      setPrivateKey(storedPk);
+    const lowerUsername = data.user.username.toLowerCase();
+    const pkSign = await loadKey(`ik_sign_priv_${lowerUsername}`);
+    const pkDh = await loadKey(`ik_dh_priv_${lowerUsername}`);
+    if (pkSign && pkDh) {
+       setIdentityKeys({ sign: pkSign, dh: pkDh });
+       setNeedsPinRestore(false);
+    } else {
+       setNeedsPinRestore(true);
     }
   };
 
-  const logout = () => {
+  const completePinRestore = async (keysObject) => {
+    setIdentityKeys(keysObject);
+    setNeedsPinRestore(false);
+  };
+
+  useEffect(() => {
+    const handleForcedLogout = () => {
+      setToken(null);
+      setUser(null);
+      setIdentityKeys(null);
+      setNeedsPinRestore(false);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    };
+    const handleTokenRefreshed = (e) => setToken(e.detail);
+    window.addEventListener('auth-logout', handleForcedLogout);
+    window.addEventListener('auth-refreshed', handleTokenRefreshed);
+    return () => {
+       window.removeEventListener('auth-logout', handleForcedLogout);
+       window.removeEventListener('auth-refreshed', handleTokenRefreshed);
+    }
+  }, []);
+
+  const logout = async () => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const { username } = JSON.parse(storedUser);
+        const lowerUsername = username.toLowerCase();
+        await deleteKey(`ik_sign_priv_${lowerUsername}`);
+        await deleteKey(`ik_dh_priv_${lowerUsername}`);
+        await deleteKey(`privateKey_${lowerUsername}`).catch(() => {});
+        await deleteKey(`ik_priv_${lowerUsername}`).catch(() => {});
+      } catch (_) {}
+    }
+    try {
+      await authApi.logout();
+    } catch (_) {}
     setToken(null);
     setUser(null);
-    setPrivateKey(null);
+    setIdentityKeys(null);
+    setNeedsPinRestore(false);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, privateKey, login, logout, setPrivateKey, loading }}>
+    <AuthContext.Provider value={{ user, token, identityKeys, needsPinRestore, login, logout, completePinRestore, loading }}>
       {children}
     </AuthContext.Provider>
   );

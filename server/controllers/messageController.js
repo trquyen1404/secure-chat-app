@@ -3,22 +3,26 @@ const Message = require('../models/Message');
 
 exports.getMessages = async (req, res) => {
   try {
-    const { userId } = req.params; // The ID of the user we are chatting with
-    const currentUserId = req.userId; // Provided by auth middleware
-
+    const { userId } = req.params;
+    const currentUserId = req.userId;
+    const { cursor } = req.query;
+    const limit = 50;
+    const whereClause = {
+      [Op.or]: [
+        { senderId: currentUserId, recipientId: userId },
+        { senderId: userId, recipientId: currentUserId }
+      ]
+    };
+    if (cursor) {
+      whereClause.createdAt = { [Op.lt]: new Date(cursor) };
+    }
     const messages = await Message.findAll({
-      where: {
-        [Op.or]: [
-          { senderId: currentUserId, recipientId: userId },
-          { senderId: userId, recipientId: currentUserId }
-        ]
-      },
-      order: [['createdAt', 'ASC']]
+      where: whereClause,
+      order: [['createdAt', 'DESC']],
+      limit
     });
-
-    res.json(messages);
+    res.json(messages.reverse());
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: 'Failed to fetch messages' });
   }
 };
