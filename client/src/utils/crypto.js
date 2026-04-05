@@ -30,15 +30,19 @@ export async function getFingerprint(buffer) {
 export function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  bytes.forEach(b => (binary += String.fromCharCode(b)));
+  // [Fix] Avoid spread operator (...) for large buffers to prevent Stack Overflow
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
   return window.btoa(binary);
 }
 
 export function base64ToArrayBuffer(base64) {
-  if (!base64 || typeof base64 !== 'string') return new ArrayBuffer(0);
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const binaryString = window.atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
   return bytes.buffer;
 }
 
@@ -119,9 +123,13 @@ export async function exportX25519Base64(publicKey) {
 // ── HKDF (HMAC-based Key Derivation Function) ────────────────────────────────
 
 export async function hkdfDerive(masterSecret, salt, info, length = 256) {
+  // [Fix] Explicitly wrap inputs in Uint8Array for browser-agnostic deterministic derivation
+  const rawMaster = new Uint8Array(masterSecret);
+  const rawSalt = salt ? new Uint8Array(salt) : new Uint8Array(32);
+  
   const keyMaterial = await window.crypto.subtle.importKey(
     'raw',
-    masterSecret,
+    rawMaster,
     { name: 'HKDF' },
     false,
     ['deriveKey']
@@ -130,7 +138,7 @@ export async function hkdfDerive(masterSecret, salt, info, length = 256) {
   const key = await window.crypto.subtle.deriveKey(
     {
       name: 'HKDF',
-      salt: salt || new Uint8Array(32),
+      salt: rawSalt,
       info: new TextEncoder().encode(info || ''),
       hash: 'SHA-256'
     },

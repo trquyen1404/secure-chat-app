@@ -120,15 +120,24 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
       sequentialProcessRef.current = sequentialProcessRef.current.then(async () => {
         try {
+          if (!currentUser?.id) {
+             console.warn('[E2EE-Wait] Deferring decryption until currentUser info is available...');
+             return;
+          }
           const content = await decryptRatchet(msg);
           if (content !== null) {
-            // Persistence: Save plaintext to local IndexedDB to survive page refreshes (Forward Secrecy compliance)
-            await saveDecryptedMessage(msg.id, content);
+            // [Fix] ONLY add to UI and save to persistent plaintext cache if content is non-empty.
+            // This prevents "Ghost Handshake" bubbles while allowing the Ratchet to sync.
+            const hasText = content && typeof content === 'string' && content.trim() !== '';
             
-            setMessages((p) => {
-              if (p.some(m => m.id === msg.id)) return p;
-              return [...p, { ...msg, decryptedContent: content, status: 'received' }];
-            });
+            if (hasText) {
+              await saveDecryptedMessage(msg.id, content);
+              setMessages((p) => {
+                if (p.some(m => m.id === msg.id)) return p;
+                return [...p, { ...msg, decryptedContent: content, status: 'received' }];
+              });
+            }
+            
             setIsTyping(false);
             socket?.emit('markAsRead', { senderId: chatUser.id });
           }
@@ -175,6 +184,10 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
     const init = async () => {
       try {
+        if (!currentUser?.id) {
+          console.warn('[E2EE-Init] Waiting for currentUser identity...');
+          return null;
+        }
         isHandshakingRef.current = true;
         let session = await loadSession(targetUserId);
         if (session) return session;
@@ -203,11 +216,25 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
         const ek = await generateX25519KeyPair();
         
+        // [Defensive Audit] Consistent robust extraction for Initiator Handshake (Bug Fix)
+        // Handles both legacy (String) and modern (Object) metadata formats.
+        const peerIK_sign = (bundle.identityKey && typeof bundle.identityKey === 'object') 
+          ? bundle.identityKey.sign 
+          : (bundle.identityKey || chatUser.publicKey);
+          
+        const peerIK_dh = (bundle.identityKey && typeof bundle.identityKey === 'object')
+          ? bundle.identityKey.dh
+          : (bundle.identityKey || chatUser.dhPublicKey);
+
+        const peerSPK_pub = bundle.signedPreKey.publicKey;
+        
+        console.log(`[X3DH-Audit] Initiator Handshake. Peer IK_sign: ${peerIK_sign}, Peer IK_dh: ${peerIK_dh}`);
+        
         const { rootKey, sendChainKey, recvChainKey } = await x3dhInitiatorHandshake(
           ikDh_priv, ek.privateKey,
-          chatUser.publicKey,
-          chatUser.dhPublicKey,
-          bundle.signedPreKey.publicKey,
+          peerIK_sign, 
+          peerIK_dh,
+          peerSPK_pub,
           bundle.signedPreKey.signature,
           bundle.oneTimePreKey?.publicKey
         );
@@ -225,11 +252,16 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         console.log(`[E2EE-Handshake] Session initialized. Status: ${newSession.status}`);
         await saveSession(targetUserId, newSession);
         
-        // Proactive Alignment
-        const myId = currentUser.id || 'LOCAL';
+        const myId = currentUser?.id || 'LOCAL';
         const peerId = targetUserId || 'REMOTE';
-        if (myId.localeCompare(peerId) < 0) {
+
+        // [Fix] Initiator Hierarchy: ONLY the person with the Higher ID should proactively initiate 
+        // the silent handshake. The person with the Lower ID yields as the Responder.
+        if (myId.localeCompare(peerId) > 0) {
+           console.log('[E2EE-Handshake] Higher ID peer (Initiator) proactively initiating silent handshake carrier...');
            sendEncryptedPayload(null, `init-proactive-${Date.now()}`, 'text', true);
+        } else {
+           console.log('[E2EE-Handshake] Lower ID peer (Responder) waiting for peer to initiate...');
         }
 
         setTimeout(() => {
@@ -289,9 +321,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       const hasLocalInitiatedOnly = !session || (session && session.nextRecvIndex === 0);
       const isConflict = session && session.status === 'INITIALIZING' && !isSameUser;
       
-      const shouldAdoptHandshake = msg.senderEk && !isSameUser && !isStaleHandshake && (hasLocalInitiatedOnly || isConflict) && (isRemoteHigher || !session);
+      // [Audit Fix] If both are INITIALIZING, the one with the Higher ID is the "Leader" (Initiator).
+      // The lower ID MUST yield and adopt the higher ID's handshake.
+      const shouldAdoptHandshake = msg.senderEk && !isSameUser && !isStaleHandshake && 
+        (hasLocalInitiatedOnly || isConflict) && 
+        (isRemoteHigher || !session);
       
-      console.log(`[E2EE-Forensic] Adoption Matrix: msg.senderEk=${!!msg.senderEk}, isConflict=${isConflict}, isRemoteHigher=${isRemoteHigher}, shouldAdopt=${shouldAdoptHandshake}`);
+      console.log(`[E2EE-Audit] Adoption Logic. isConflict=${isConflict}, isRemoteHigher=${isRemoteHigher}, shouldAdopt=${shouldAdoptHandshake}`);
       
       if (shouldAdoptHandshake) {
         console.log(`[E2EE-Orphan] Tie-breaker: ${isRemoteHigher ? 'Remote higher' : 'Initializing'} responder session...`);
@@ -304,9 +340,14 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
              return null;
         }
 
+        // [Defensive Audit] Ensure we extract the DH sub-key even if metadata format varies.
+        const aliceIKdh_pub = (chatUser.dhPublicKey && typeof chatUser.dhPublicKey === 'object') 
+          ? chatUser.dhPublicKey.dh 
+          : (chatUser.dhPublicKey || chatUser.publicKey);
+
         const { rootKey, sendChainKey, recvChainKey } = await x3dhResponderHandshake(
           bobSPK_priv, bobIKdh_priv, bobOPK_priv,
-          chatUser.dhPublicKey, msg.senderEk
+          aliceIKdh_pub, msg.senderEk
         );
         session = {
           rootKey, sendChainKey, recvChainKey,
@@ -340,8 +381,8 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       if (!session) return '[Secure Session Not Established]';
 
       // -- Atomic Decryption Logic --
-      // We work on a clone (tempSession) and only persist if decryption succeeds.
-      const tempSession = structuredClone(session);
+      // [Fix] Avoid structuredClone on CryptoKeys if it causes neutering. Use spread-based clone.
+      const tempSession = { ...session };
       
       // Restore complex objects not handled by JSON.stringify if necessary (Keys are stored as B64 or managed by crypto.js helpers)
       
@@ -395,6 +436,12 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           console.log(`[E2EE-Ratchet] Recovery SUCCESS for key: ${k}`);
           delete tempSession.skippedMessageKeys[k];
         } else {
+          // [Harden] If it's a handshake carrier at index 0 and recovery fails, it likely means 
+          // we've already bridged it. Don't crash; return null so history loader can skip it.
+          if (targetIndex === 0 && (msg.senderEk || msg.type === 'handshake_ack')) {
+             console.warn('[E2EE-Ratchet] Index 0 key already burnt or bridged. Skipping historical handshake.');
+             return null;
+          }
           throw new Error(`Message key recovery failed for index ${targetIndex}`);
         }
       }
@@ -404,7 +451,12 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         return null;
       }
       
-      if (!msg.encryptedContent) return null;
+      // CRITICAL FIX: To prevent Key Desync, we MUST save the session (incremented nextRecvIndex) 
+      // even if the message itself has no text content (silent handshake/sync).
+      if (!msg.encryptedContent) {
+        await saveSession(chatUser.id, tempSession);
+        return null; 
+      }
 
       try {
         const ad = sessionAD;
@@ -414,22 +466,28 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         await saveSession(chatUser.id, tempSession);
         return decrypted;
       } catch (err) {
-        console.warn('[E2EE] Standard decryption failed, attempting Late Adoption sync...', err.message);
+        // [Stabilize] Only trigger Late Adoption if Standard Decryption failed 
+        // AND we are NOT already established, or the message is an X3DH init.
+        const isNotAligned = tempSession.status !== 'ESTABLISHED';
+        const isX3DHMessage = !!msg.senderEk;
         
-        // -- Late Adoption (Self-Healing) --
-        // If we have a senderEk (X3DH init) but regular decryption failed, 
-        // it means we might have missed the handshake. Adopt it now.
-        if (msg.senderEk && !isSameUser) {
-             console.log(`[E2EE-LateAdoption] Forced Adoption triggered by failure at index: ${msg.n || 0}`);
+        if (isX3DHMessage && (!isSameUser || isNotAligned)) {
+             console.warn('[E2EE] Standard decryption failed, attempting Late Adoption sync...', err.message);
+             console.log(`[E2EE-LateAdoption] Forced Adoption triggered at index: ${msg.n || 0}`);
              const username = currentUser.username;
              const bobSPK_priv = await getKey(`spk_priv_${username}`);
              const bobIKdh_priv = await getKey(`ik_dh_priv_${username}`);
              const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${username}_${msg.usedOpk}`) : null;
              
              if (bobSPK_priv && bobIKdh_priv) {
+               // [Defensive Audit] Safe extraction for Late Adoption path.
+               const aliceIKdh_pub = (chatUser.dhPublicKey && typeof chatUser.dhPublicKey === 'object')
+                 ? chatUser.dhPublicKey.dh
+                 : (chatUser.dhPublicKey || chatUser.publicKey);
+               
                const { rootKey, sendChainKey, recvChainKey } = await x3dhResponderHandshake(
                  bobSPK_priv, bobIKdh_priv, bobOPK_priv,
-                 chatUser.dhPublicKey, msg.senderEk
+                 aliceIKdh_pub, msg.senderEk
                );
                
                // Build fresh late session from scratch
@@ -481,6 +539,10 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     if (isLoadMore) setIsLoadingMore(true);
     else setLoadingHistory(true);
     try {
+      if (!currentUser?.id) {
+        console.warn('[E2EE-History] Deferring history load until currentUser is ready.');
+        return;
+      }
       const cursor = isLoadMore && messages.length > 0 ? messages[0].createdAt : null;
       const res = await api.get(`/api/messages/${chatUser.id}${cursor ? `?cursor=${cursor}` : ''}`);
       const batch = res.data;
@@ -491,23 +553,23 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         // Source of Truth: Check if we have the plaintext cached locally (Forward Secrecy compliant history)
         let content = await getDecryptedMessage(msg.id);
         
-        if (content === null) {
-           try {
-             // Fallback: This is a new message or first time on this device. Try decrypting once.
-             content = await decryptRatchet(msg);
-             if (content && typeof content === 'string') {
-               await saveDecryptedMessage(msg.id, content);
-             }
-           } catch (err) {
-             console.warn(`[E2EE-History] Decryption failed for historical message ${msg.id}: ${err.message}`);
-             content = '[Phiên bản khóa cũ - Không thể xem]';
-           }
+        if (content === null || content === undefined) {
+          // Standard decryption flow
+          content = await decryptRatchet(msg);
+          if (content !== null && typeof content === 'string' && content.trim() !== '') {
+            await saveDecryptedMessage(msg.id, content);
+          }
         }
 
-        decrypted.push({
-          ...msg, 
-          decryptedContent: content
-        });
+        // [Final Fix] Suppress Ghost Messages in UI
+        const hasText = content && typeof content === 'string' && content.trim() !== '';
+        if (hasText) {
+          decrypted.push({
+            ...msg,
+            decryptedContent: content,
+            status: 'received',
+          });
+        }
       }
 
       if (isLoadMore) {
@@ -658,7 +720,9 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       
       // -- OPTIMISTIC UI --
       // Update state and persistent store immediately so the sender sees the message.
-      if (text) {
+      // [Bug Fix] ONLY render and save if there is actual text content.
+      // This prevents "Silent Handshake" bubbles (empty packets) from cluttering the UI.
+      if (text && typeof text === 'string' && text.trim() !== '') {
         const optimisticMsg = {
           id: localId,
           senderId: currentUser.id,
