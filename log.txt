@@ -1,0 +1,339 @@
+alpha trước f5:
+react-dom.development.js:29895 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+crypto.js:19 [E2EE-AD] Generating AD for dbbe289f... and a01e12c5... -> "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f"
+ChatWindow.jsx:182 [X3DH-Audit] Initiator (Alice) Start with a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:188 [E2EE-Trace] Fetching peer bundle (Attempt 1/3)...
+crypto.js:168 [X3DH-Audit] Peer Identity Key (IK): v6n/IXPt
+crypto.js:169 [X3DH-Audit] Peer Signed Prekey (SPK): vFy0j7Dc
+crypto.js:183 [X3DH-Audit] Combined Secret (Raw) FP: oX4kohdG
+crypto.js:145 [CRYPTO] Derived Key (Info: ROOT_KEY_V5) Fingerprint: NBHxZtcn
+crypto.js:145 [CRYPTO] Derived Key (Info: SENDER_CHAIN_V1) Fingerprint: 26MJA79S
+crypto.js:145 [CRYPTO] Derived Key (Info: RECEIVER_CHAIN_V1) Fingerprint: oJWVNeML
+crypto.js:191 [X3DH-Init] FINAL ROOT FP: NBHxZtcn
+ChatWindow.jsx:225 [E2EE-Handshake] Session initialized. Status: INITIALIZING
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 0, senderEk: true, localId: init-proactive-1775368173222
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 0, Handshake present: true
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=true, isConflict=true, isRemoteHigher=false, shouldAdopt=false
+ChatWindow.jsx:327 [E2EE-Orphan] ALIGNMENT: Received text from peer. Transitioning to ESTABLISHED.
+ChatWindow.jsx:332 [E2EE-Orphan] State saved as ESTABLISHED. Triggering queue drain.
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 0
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: YES
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: sHL+XUUb
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: rerUq7w2
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: handshake_ack, n: 0, senderEk: false, localId: null
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 0, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:335 [E2EE-Orphan] Manual ACK received. Draining remaining outgoing messages.
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 0
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: sHL+XUUb
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: rerUq7w2
+ChatWindow.jsx:577 [TX-Step] Attempting n=0 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: wt/Dwirp
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: AG84h0hW
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 0
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: MZaaJgww)
+ChatWindow.jsx:689 [E2EE-Send] Attaching handshake carrier (senderEk present: true) to message n=0
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368177565, Index n: 0, Handshake: true
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368177565 -> a8a14dc7-78ed-4ddf-abb1-a1f246ef46ed
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: handshake_ack, n: 0, senderEk: false, localId: null
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 0, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:335 [E2EE-Orphan] Manual ACK received. Draining remaining outgoing messages.
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 1
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+ChatWindow.jsx:392 [E2EE-Ratchet] Attempting recovery from skippedMessageKeys: ze/mi8sShEetZ5DVa/ObujZcUt+/dciptCWd2F632GQ=_0
+ChatWindow.jsx:473 [decryptRatchet] Error: Message key recovery failed for index 0
+    at decryptRatchet (ChatWindow.jsx:398:17)
+    at async ChatWindow.jsx:123:27
+decryptRatchet @ ChatWindow.jsx:473
+await in decryptRatchet
+(anonymous) @ ChatWindow.jsx:123
+Promise.then
+onMsg @ ChatWindow.jsx:121
+Emitter.emit @ index.js:136
+emitEvent @ socket.js:536
+onevent @ socket.js:523
+onpacket @ socket.js:493
+Emitter.emit @ index.js:136
+(anonymous) @ manager.js:209
+Promise.then
+(anonymous) @ globals.js:4
+ondecoded @ manager.js:208
+Emitter.emit @ index.js:136
+add @ index.js:147
+ondata @ manager.js:195
+Emitter.emit @ index.js:136
+_onPacket @ socket.js:259
+Emitter.emit @ index.js:136
+onPacket @ transport.js:99
+onData @ transport.js:91
+ws.onmessage @ websocket.js:48
+
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 1, senderEk: false, localId: loc-1775368185207
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 1, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 1, Current Recv Counter: 1
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: vjgHWaDx
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: mgNAa0Q0
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: /4/nIv5Z)
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 2, senderEk: false, localId: loc-1775368193423
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 2, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 2, Current Recv Counter: 2
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: bdtzObaf
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: 3uhUDvza
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: l1Ry5/MG)
+ChatWindow.jsx:577 [TX-Step] Attempting n=1 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: VUdkBLoV
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: V9JjAyt9
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 1
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: mijs9thX)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368199013, Index n: 1, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368199013 -> b61fe365-da79-48a0-919b-f01953c6df7b
+
+Beta trước f5:
+react-dom.development.js:29895 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+Register.jsx:105 [Registration] Generating new cryptographic bundle...
+Register.jsx:157 [Registration] Keys successfully persisted to IndexedDB.
+crypto.js:19 [E2EE-AD] Generating AD for a01e12c5... and dbbe289f... -> "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f"
+ChatWindow.jsx:182 [X3DH-Audit] Initiator (Alice) Start with dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:188 [E2EE-Trace] Fetching peer bundle (Attempt 1/3)...
+crypto.js:168 [X3DH-Audit] Peer Identity Key (IK): vnky0Eh9
+crypto.js:169 [X3DH-Audit] Peer Signed Prekey (SPK): pIG8Knty
+crypto.js:183 [X3DH-Audit] Combined Secret (Raw) FP: qbNYvHoA
+crypto.js:145 [CRYPTO] Derived Key (Info: ROOT_KEY_V5) Fingerprint: 5bkzsc6i
+crypto.js:145 [CRYPTO] Derived Key (Info: SENDER_CHAIN_V1) Fingerprint: Zq9vc11s
+crypto.js:145 [CRYPTO] Derived Key (Info: RECEIVER_CHAIN_V1) Fingerprint: 9/IuVASs
+crypto.js:191 [X3DH-Init] FINAL ROOT FP: 5bkzsc6i
+ChatWindow.jsx:225 [E2EE-Handshake] Session initialized. Status: INITIALIZING
+ChatWindow.jsx:577 [TX-Step] Attempting n=0 isRetry=true status=INITIALIZING
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: dpLhs8+A
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: hZBc11nO
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 0
+ChatWindow.jsx:689 [E2EE-Send] Attaching handshake carrier (senderEk present: true) to message n=0
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: init-proactive-1775368173222, Index n: 0, Handshake: true
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: init-proactive-1775368173222 -> fb07b954-b33c-45e4-8b3a-2af0472f2f0c
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 0, Handshake present: true
+ChatWindow.jsx:282 [AD-Sync] ID_Self: a01e12c5-af45-4421-869b-5052ca18b174 ID_Remote: dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: a01e12c5-af45-4421-869b-5052ca18b174, Remote ID: dbbe289f-0551-4c09-9994-b968cebb763f, Decision: I yield (Responder)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=true, isConflict=true, isRemoteHigher=true, shouldAdopt=true
+ChatWindow.jsx:297 [E2EE-Orphan] Tie-breaker: Remote higher responder session...
+crypto.js:205 [X3DH-Audit] Peer Identity Key (IK): vnky0Eh9
+crypto.js:206 [X3DH-Audit] Peer Ephemeral Key (EK): VCZLY2ZT
+crypto.js:219 [X3DH-Audit] Combined Secret (Raw) FP: wmGyIKyi
+crypto.js:145 [CRYPTO] Derived Key (Info: ROOT_KEY_V5) Fingerprint: B8Cg1wuv
+crypto.js:145 [CRYPTO] Derived Key (Info: RECEIVER_CHAIN_V1) Fingerprint: WEiz0GYk
+crypto.js:145 [CRYPTO] Derived Key (Info: SENDER_CHAIN_V1) Fingerprint: zwSPEo2j
+crypto.js:227 [X3DH-Resp] FINAL ROOT FP: B8Cg1wuv
+ChatWindow.jsx:318 [E2EE-Orphan] Orphan Handshake Adoped. Session Re-aligned.
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 0
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: JugjY5YO
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: 100Bh5cn
+ChatWindow.jsx:577 [TX-Step] Attempting n=0 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: rsljINk6
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: JoDTqXiR
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 0
+ChatWindow.jsx:689 [E2EE-Send] Attaching handshake carrier (senderEk present: false) to message n=0
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: null, Index n: 0, Handshake: true
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 0, senderEk: true, localId: loc-1775368177565
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: dbbe289f-0551-4c09-9994-b968cebb763f, Index n: 0, Handshake present: true
+ChatWindow.jsx:282 [AD-Sync] ID_Self: a01e12c5-af45-4421-869b-5052ca18b174 ID_Remote: dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: a01e12c5-af45-4421-869b-5052ca18b174, Remote ID: dbbe289f-0551-4c09-9994-b968cebb763f, Decision: I yield (Responder)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=true, isConflict=false, isRemoteHigher=true, shouldAdopt=true
+ChatWindow.jsx:297 [E2EE-Orphan] Tie-breaker: Remote higher responder session...
+crypto.js:205 [X3DH-Audit] Peer Identity Key (IK): vnky0Eh9
+crypto.js:206 [X3DH-Audit] Peer Ephemeral Key (EK): ld/dwJGO
+crypto.js:219 [X3DH-Audit] Combined Secret (Raw) FP: oX4kohdG
+crypto.js:145 [CRYPTO] Derived Key (Info: ROOT_KEY_V5) Fingerprint: NBHxZtcn
+crypto.js:145 [CRYPTO] Derived Key (Info: RECEIVER_CHAIN_V1) Fingerprint: oJWVNeML
+crypto.js:145 [CRYPTO] Derived Key (Info: SENDER_CHAIN_V1) Fingerprint: 26MJA79S
+crypto.js:227 [X3DH-Resp] FINAL ROOT FP: NBHxZtcn
+ChatWindow.jsx:318 [E2EE-Orphan] Orphan Handshake Adoped. Session Re-aligned.
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 0
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: wt/Dwirp
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: AG84h0hW
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: MZaaJgww)
+ChatWindow.jsx:577 [TX-Step] Attempting n=0 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: sHL+XUUb
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: rerUq7w2
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 0
+ChatWindow.jsx:689 [E2EE-Send] Attaching handshake carrier (senderEk present: false) to message n=0
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: null, Index n: 0, Handshake: true
+ChatWindow.jsx:577 [TX-Step] Attempting n=1 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: vjgHWaDx
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: mgNAa0Q0
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 1
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: /4/nIv5Z)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368185207, Index n: 1, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368185207 -> 7c83f156-5242-4f87-a0b0-761c14199df8
+ChatWindow.jsx:577 [TX-Step] Attempting n=2 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: bdtzObaf
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: 3uhUDvza
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 2
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: l1Ry5/MG)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368193423, Index n: 2, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368193423 -> 80725a02-c24c-4afe-8190-1b68adda5441
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 1, senderEk: false, localId: loc-1775368199013
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: dbbe289f-0551-4c09-9994-b968cebb763f, Index n: 1, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: a01e12c5-af45-4421-869b-5052ca18b174 ID_Remote: dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: a01e12c5-af45-4421-869b-5052ca18b174, Remote ID: dbbe289f-0551-4c09-9994-b968cebb763f, Decision: I yield (Responder)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=true, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 1, Current Recv Counter: 0
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: wt/Dwirp
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: AG84h0hW
+ChatWindow.jsx:376 [E2EE-Ratchet] Derived key for future message: bmTM3FPsn3S/DZWoFMtfn7VqyBlaVwBfQ//99qBohVU=_0
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: VUdkBLoV
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: V9JjAyt9
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: mijs9thX)
+
+Node: tôi thấy có 1 tin nhắn null khi gửi tin nhắn đầu tiên và sau đó được recovery?
+
+alpha sau f5:
+react-dom.development.js:29895 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+crypto.js:19 [E2EE-AD] Generating AD for dbbe289f... and a01e12c5... -> "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f"
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 0, Handshake present: true
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=true, isConflict=false, isRemoteHigher=false, shouldAdopt=false
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 3
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: YES
+ChatWindow.jsx:392 [E2EE-Ratchet] Attempting recovery from skippedMessageKeys: ze/mi8sShEetZ5DVa/ObujZcUt+/dciptCWd2F632GQ=_0
+ChatWindow.jsx:473 [decryptRatchet] Error: Message key recovery failed for index 0
+    at decryptRatchet (ChatWindow.jsx:398:17)
+    at async loadMessages (ChatWindow.jsx:497:24)
+decryptRatchet @ ChatWindow.jsx:473
+await in decryptRatchet
+loadMessages @ ChatWindow.jsx:497
+await in loadMessages
+(anonymous) @ ChatWindow.jsx:536
+Promise.then
+(anonymous) @ ChatWindow.jsx:536
+commitHookEffectListMount @ react-dom.development.js:23189
+commitPassiveMountOnFiber @ react-dom.development.js:24965
+commitPassiveMountEffects_complete @ react-dom.development.js:24930
+commitPassiveMountEffects_begin @ react-dom.development.js:24917
+commitPassiveMountEffects @ react-dom.development.js:24905
+flushPassiveEffectsImpl @ react-dom.development.js:27078
+flushPassiveEffects @ react-dom.development.js:27023
+commitRootImpl @ react-dom.development.js:26974
+commitRoot @ react-dom.development.js:26721
+performSyncWorkOnRoot @ react-dom.development.js:26156
+flushSyncCallbacks @ react-dom.development.js:12042
+(anonymous) @ react-dom.development.js:25690
+ChatWindow.jsx:577 [TX-Step] Attempting n=2 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: 8+Vz+ZM1
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: d2wC/a9v
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 2
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: rgNVr99D)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368394847, Index n: 2, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368394847 -> a1fead18-d1fc-409d-9cb6-9ac3770cdbbf
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 3, senderEk: false, localId: loc-1775368403978
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 3, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 3, Current Recv Counter: 3
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: l1u7GddI
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: NL/nt1ic
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: lHttQmyN)
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 4, senderEk: false, localId: loc-1775368407487
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 4, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 4, Current Recv Counter: 4
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: 9H3ISHTU
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: Ih46oR/r
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: Y73lGbdg)
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 5, senderEk: false, localId: loc-1775368409646
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 5, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: dbbe289f-0551-4c09-9994-b968cebb763f ID_Remote: a01e12c5-af45-4421-869b-5052ca18b174
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: dbbe289f-0551-4c09-9994-b968cebb763f, Remote ID: a01e12c5-af45-4421-869b-5052ca18b174, Decision: I win (Initiator)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=false, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 5, Current Recv Counter: 5
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: sdcKS888
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: g11AVcl9
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: 0keevPxk)
+ChatWindow.jsx:577 [TX-Step] Attempting n=3 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: k7HAczNA
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: 52F7iBT/
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 3
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: Yx+ThFhS)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368419626, Index n: 3, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368419626 -> 00b8e1bb-078b-4d39-8a74-91d9aaf0f3e0
+
+Beta sau f5:
+react-dom.development.js:29895 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+crypto.js:19 [E2EE-AD] Generating AD for a01e12c5... and dbbe289f... -> "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f"
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: a01e12c5-af45-4421-869b-5052ca18b174, Index n: 0, Handshake present: true
+ChatWindow.jsx:282 [AD-Sync] ID_Self: a01e12c5-af45-4421-869b-5052ca18b174 ID_Remote: dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: a01e12c5-af45-4421-869b-5052ca18b174, Remote ID: dbbe289f-0551-4c09-9994-b968cebb763f, Decision: I yield (Responder)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=true, isConflict=false, isRemoteHigher=true, shouldAdopt=false
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 0, Current Recv Counter: 2
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: YES
+ChatWindow.jsx:392 [E2EE-Ratchet] Attempting recovery from skippedMessageKeys: bmTM3FPsn3S/DZWoFMtfn7VqyBlaVwBfQ//99qBohVU=_0
+ChatWindow.jsx:395 [E2EE-Ratchet] Recovery SUCCESS for key: bmTM3FPsn3S/DZWoFMtfn7VqyBlaVwBfQ//99qBohVU=_0
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 2, senderEk: false, localId: loc-1775368394847
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: dbbe289f-0551-4c09-9994-b968cebb763f, Index n: 2, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: a01e12c5-af45-4421-869b-5052ca18b174 ID_Remote: dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: a01e12c5-af45-4421-869b-5052ca18b174, Remote ID: dbbe289f-0551-4c09-9994-b968cebb763f, Decision: I yield (Responder)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=true, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 2, Current Recv Counter: 2
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: 8+Vz+ZM1
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: d2wC/a9v
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: rgNVr99D)
+ChatWindow.jsx:577 [TX-Step] Attempting n=3 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: l1u7GddI
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: NL/nt1ic
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 3
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: lHttQmyN)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368403978, Index n: 3, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368403978 -> 2e24405e-49cc-45d5-af77-ed017c064f65
+ChatWindow.jsx:577 [TX-Step] Attempting n=4 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: 9H3ISHTU
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: Ih46oR/r
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 4
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: Y73lGbdg)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368407487, Index n: 4, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368407487 -> a4e2cb50-4d35-44db-bbbd-fc18e305b913
+ChatWindow.jsx:577 [TX-Step] Attempting n=5 isRetry=false status=ESTABLISHED
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: sdcKS888
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: g11AVcl9
+ChatWindow.jsx:674 [E2EE] Encrypting message with sender index: 5
+crypto.js:266 [CRYPTO-Audit] Encrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: 0keevPxk)
+ChatWindow.jsx:693 [E2EE-Send] Emitting payload to socket. LocalId: loc-1775368409646, Index n: 5, Handshake: false
+ChatWindow.jsx:95 [E2EE-TX-Ack] Reconciling ID: loc-1775368409646 -> 76942718-dbbc-4324-b3e4-505e73b2fc70
+ChatWindow.jsx:106 [RX-Step] Received Raw. Type: text, n: 3, senderEk: false, localId: loc-1775368419626
+ChatWindow.jsx:268 [E2EE-Receive] New message arrival. Sender: dbbe289f-0551-4c09-9994-b968cebb763f, Index n: 3, Handshake present: false
+ChatWindow.jsx:282 [AD-Sync] ID_Self: a01e12c5-af45-4421-869b-5052ca18b174 ID_Remote: dbbe289f-0551-4c09-9994-b968cebb763f
+ChatWindow.jsx:283 [E2EE-Forensic] My ID: a01e12c5-af45-4421-869b-5052ca18b174, Remote ID: dbbe289f-0551-4c09-9994-b968cebb763f, Decision: I yield (Responder)
+ChatWindow.jsx:294 [E2EE-Forensic] Adoption Matrix: msg.senderEk=false, isConflict=false, isRemoteHigher=true, shouldAdopt=null
+ChatWindow.jsx:367 [E2EE-Ratchet] Processing Pipeline: Target Index (n): 3, Current Recv Counter: 3
+ChatWindow.jsx:368 [E2EE-Ratchet] Rotation Required: NO
+crypto.js:145 [CRYPTO] Derived Key (Info: NEXT_CHAIN_KEY) Fingerprint: k7HAczNA
+crypto.js:145 [CRYPTO] Derived Key (Info: MESSAGE_KEY) Fingerprint: 52F7iBT/
+crypto.js:287 [CRYPTO-Audit] Decrypting (n=?) with AD: "a01e12c5-af45-4421-869b-5052ca18b174:dbbe289f-0551-4c09-9994-b968cebb763f" (IV FP: Yx+ThFhS)
+
+
+Node: các tin nhắn sau f5 hoạt động bình thường

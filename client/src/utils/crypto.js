@@ -8,9 +8,17 @@
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Helper for deterministic Associated Data (AD) strings based on participant IDs
-export function getAssociatedData(id1, id2) {
-  const ids = [id1, (id2 || '')].sort();
-  return ids.join('-');
+export function getAssociatedData(id01, id02) {
+  // Ensure we have strings and sort them to guarantee order-independence
+  const id1 = String(id01 || '');
+  const id2 = String(id02 || '');
+  const ids = [id1, id2].sort();
+  const ad = ids.join(':'); // Use colon as a distinct separator to avoid UUID hyphen confusion
+  
+  if (id1 !== id2) {
+    console.log(`[E2EE-AD] Generating AD for ${id1.slice(0,8)}... and ${id2.slice(0,8)}... -> "${ad}"`);
+  }
+  return ad;
 }
 
 // Helper for diagnostic logging (fingerprints, not the keys themselves)
@@ -289,7 +297,7 @@ export async function decryptMessageGCM(ciphertextB64, ivB64, key, associatedDat
     return new TextDecoder().decode(decrypted);
   } catch (err) {
     console.error(`[CRYPTO] Decryption failed! (AD: "${associatedData}", IV FP: ${await getFingerprint(base64ToArrayBuffer(ivB64))})`, err);
-    throw new Error('E2EE Decryption Failed (Possible AD/MAC Mismatch)');
+    throw new Error('E2EE Decryption Failed (Possible Key Desync or AD Mismatch)');
   }
 }
 

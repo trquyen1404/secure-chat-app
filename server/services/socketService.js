@@ -48,8 +48,16 @@ module.exports = (io) => {
 
     socket.on('sendMessage', async (data) => {
       try {
-        const { recipientId, encryptedContent, ratchetKey, n, pn, iv, replyToId, senderEk, usedOpk, localId } = data;
-        if (!recipientId || !encryptedContent || !iv) return socket.emit('error', { message: 'Invalid message data' });
+        const { recipientId, encryptedContent, ratchetKey, n, pn, iv, replyToId, senderEk, usedOpk, localId, type } = data;
+        
+        console.log(`[RX-Trace] Received packet. n=${n} Handshake=${!!senderEk} Type=${type || 'text'}`);
+
+        // Relax validation: Allow packets without encryptedContent IF they are handshakes (senderEk) or ACKs
+        const isHandshake = !!senderEk;
+        const isAck = type === 'handshake_ack';
+        if (!recipientId || (!encryptedContent && !isHandshake && !isAck)) {
+           return socket.emit('error', { message: 'Invalid message data (Empty payload rejected)' });
+        }
 
         const message = await Message.create({
           senderId: socket.userId,
@@ -81,6 +89,7 @@ module.exports = (io) => {
           reactions: {},
           readAt: null,
           createdAt: message.createdAt,
+          type: type || 'text'
         };
 
         socket.emit('newMessage', messageData);
@@ -88,6 +97,23 @@ module.exports = (io) => {
         if (recipientSocketId) io.to(recipientSocketId).emit('newMessage', messageData);
       } catch (error) {
         console.error('[socket] sendMessage error:', error);
+      }
+    });
+
+    socket.on('handshake_ack', async (data) => {
+      try {
+        const { recipientId } = data;
+        if (!recipientId) return;
+        const recipientSocketId = userSockets.get(recipientId);
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('handshake_ack', {
+            ...data,
+            senderId: socket.userId,
+            type: 'handshake_ack'
+          });
+        }
+      } catch (error) {
+        console.error('[socket] handshake_ack error:', error);
       }
     });
 

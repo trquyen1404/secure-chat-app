@@ -3,9 +3,10 @@
  */
 
 const DB_NAME = 'secure-chat-ratchet';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented for message store
 const STORE_SESSIONS = 'sessions';
 const STORE_SKIPPED_KEYS = 'skipped_keys';
+const STORE_MESSAGES = 'decrypted_messages';
 
 export async function initRatchetDB() {
   return new Promise((resolve, reject) => {
@@ -15,8 +16,8 @@ export async function initRatchetDB() {
       if (!db.objectStoreNames.contains(STORE_SESSIONS)) {
         db.createObjectStore(STORE_SESSIONS, { keyPath: 'userId' });
       }
-      if (!db.objectStoreNames.contains(STORE_SKIPPED_KEYS)) {
-        db.createObjectStore(STORE_SKIPPED_KEYS, { keyPath: ['userId', 'ratchetKey', 'n'] });
+      if (!db.objectStoreNames.contains(STORE_MESSAGES)) {
+        db.createObjectStore(STORE_MESSAGES, { keyPath: 'id' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -72,6 +73,48 @@ export async function getAndDeleteSkippedKey(userId, ratchetKey, n) {
       }
     };
     request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveDecryptedMessage(id, content) {
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    store.put({ id, content, timestamp: Date.now() });
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function getDecryptedMessage(id) {
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readonly');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    const request = store.get(id);
+    request.onsuccess = () => resolve(request.result?.content || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function updateDecryptedMessageId(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    const getReq = store.get(oldId);
+    getReq.onsuccess = () => {
+      if (getReq.result) {
+        const data = { ...getReq.result, id: newId };
+        store.put(data);
+        store.delete(oldId);
+      }
+      resolve();
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 }
 

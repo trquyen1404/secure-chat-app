@@ -14,6 +14,7 @@ const ChatApp = () => {
       
       {selectedUser ? (
         <ChatWindow 
+          key={selectedUser.id}
           user={selectedUser} 
           onClose={() => setSelectedUser(null)}
         />

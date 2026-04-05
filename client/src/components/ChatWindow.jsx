@@ -18,7 +18,7 @@ import {
   arrayBufferToBase64,
   base64ToArrayBuffer
 } from '../utils/crypto';
-import { loadSession, saveSession } from '../utils/ratchetStore';
+import { loadSession, saveSession, saveDecryptedMessage, getDecryptedMessage, updateDecryptedMessageId } from '../utils/ratchetStore';
 import { getKey } from '../utils/keyStore';
 import MessageBubble from './MessageBubble';
 import {
@@ -76,13 +76,98 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const autoInitRef = useRef(new Set());
   const isHandshakingRef = useRef(false);
   const initPromiseRef = useRef(null);
+  const messageQueueRef = useRef([]); // To hold incoming messages during handshakes
+  const sequentialProcessRef = useRef(Promise.resolve()); // Sequential decryption lock
 
-  const getAD = () => getAssociatedData(currentUser.id, chatUser?.id);
+  const sessionAD = React.useMemo(() => {
+    const id1 = currentUser?.id || 'LOCAL';
+    const id2 = chatUser?.id || 'REMOTE';
+    return getAssociatedData(id1, id2);
+  }, [currentUser?.id, chatUser?.id]);
+
+  const outgoingQueueRef = useRef([]); // To buffer outgoing messages during handshakes
+
+  const onMsg = async (msg) => {
+    if (msg.senderId === currentUser.id) {
+      // Reflection Guard: Don't try to decrypt our own message echoed from server.
+      if (msg.localId) {
+        // [Bug A Fix] Reconcile Identity: Swap localId for real server Id in persistent store
+        console.log(`[E2EE-TX-Ack] Reconciling ID: ${msg.localId} -> ${msg.id}`);
+        updateDecryptedMessageId(msg.localId, msg.id);
+        
+        setMessages((p) => p.map(m => m.id === msg.localId ? { ...m, id: msg.id, status: 'sent' } : m));
+      }
+      return;
+    }
+
+    if (
+      (msg.senderId === chatUser.id && msg.recipientId === currentUser.id)
+    ) {
+      console.log(`[RX-Step] Received Raw. Type: ${msg.type || 'text'}, n: ${msg.n}, senderEk: ${!!msg.senderEk}, localId: ${msg.localId}`);
+      
+      const isHandshakePacket = !!msg.senderEk || msg.type === 'handshake_ack';
+      const isActivelyInitializing = initPromiseRef.current || isHandshakingRef.current;
+      
+      if (isActivelyInitializing && !isHandshakePacket) {
+        console.log(`[E2EE-Queue] Buffering regular message. localId: ${msg.localId}`);
+        messageQueueRef.current.push(msg);
+        return;
+      }
+
+      if (isActivelyInitializing && isHandshakePacket) {
+        console.log(`[E2EE-Handshake] Handshake bypass: Processing incoming handshake during local init.`);
+      }
+
+      sequentialProcessRef.current = sequentialProcessRef.current.then(async () => {
+        try {
+          const content = await decryptRatchet(msg);
+          if (content !== null) {
+            // Persistence: Save plaintext to local IndexedDB to survive page refreshes (Forward Secrecy compliance)
+            await saveDecryptedMessage(msg.id, content);
+            
+            setMessages((p) => {
+              if (p.some(m => m.id === msg.id)) return p;
+              return [...p, { ...msg, decryptedContent: content, status: 'received' }];
+            });
+            setIsTyping(false);
+            socket?.emit('markAsRead', { senderId: chatUser.id });
+          }
+        } catch (err) {
+          console.error(`[E2EE-Error] Type: ${err.name} Msg: ${err.message}`);
+        }
+      });
+    }
+  };
+
+  const drainMessageQueue = async () => {
+    if (messageQueueRef.current.length === 0) return;
+    console.log(`[E2EE-Queue] Draining ${messageQueueRef.current.length} buffered messages...`);
+    const buffer = [...messageQueueRef.current];
+    messageQueueRef.current = [];
+    
+    // Sort buffered messages by 'n' to ensure correct sequence
+    buffer.sort((a, b) => (a.n || 0) - (b.n || 0));
+
+    for (const msg of buffer) {
+      await onMsg(msg);
+    }
+  };
+
+  const drainOutgoingQueue = async () => {
+    if (outgoingQueueRef.current.length === 0) return;
+    const msgCount = outgoingQueueRef.current.length;
+    console.log(`[E2EE-Queue] Draining ${msgCount} outgoing messages...`);
+    const buffer = [...outgoingQueueRef.current];
+    outgoingQueueRef.current = [];
+    for (const { text, localId } of buffer) {
+      console.log(`[E2EE-Queue] Retrying buffered message: ${localId}`);
+      // isRetry = true to force bypass of handshake locks and break the re-buffering deadlock
+      await sendEncryptedPayload(text, localId, 'text', true);
+    }
+    console.log(`[E2EE-Queue] Drain complete for ${msgCount} messages.`);
+  };
 
   const getOrInitSession = async (targetUserId) => {
-    let session = await loadSession(targetUserId);
-    if (session) return session;
-
     if (initPromiseRef.current) {
       console.log('[Gating] Waiting for ongoing handshake promise...');
       return await initPromiseRef.current;
@@ -90,7 +175,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
     const init = async () => {
       try {
-        console.log(`[X3DH-Audit] Initiator (Alice) Start`);
+        isHandshakingRef.current = true;
+        let session = await loadSession(targetUserId);
+        if (session) return session;
+
+        console.log(`[X3DH-Audit] Initiator (Alice) Start with ${targetUserId}`);
         
         let bundle = null;
         let lastErr = null;
@@ -108,15 +197,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         }
         if (!bundle || !bundle.signedPreKey) throw new Error(`Failed to fetch peer bundle: ${lastErr?.message}`);
         
-        console.log(`[X3DH-Audit] Bob IK_pub (Remote) raw: ${chatUser.publicKey}`);
-        console.log(`[X3DH-Audit] Bob SPK_pub (Remote) raw: ${bundle.signedPreKey.publicKey}`);
-        
         const username = currentUser.username;
         const ikDh_priv = await getKey(`ik_dh_priv_${username}`);
         if (!ikDh_priv) throw new Error('Identity Key not found. Please re-login.');
 
         const ek = await generateX25519KeyPair();
-        console.log(`[X3DH-Audit] Alice EK_pub (Self) raw: ${await exportX25519Base64(ek.publicKey)}`);
         
         const { rootKey, sendChainKey, recvChainKey } = await x3dhInitiatorHandshake(
           ikDh_priv, ek.privateKey,
@@ -136,14 +221,29 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           pendingUsedOpk: bundle.oneTimePreKey?.publicKey || null,
           status: 'INITIALIZING'
         };
-        console.log('[E2EE] Initiator Session initialized with Peer-SPK expectation.');
+
+        console.log(`[E2EE-Handshake] Session initialized. Status: ${newSession.status}`);
         await saveSession(targetUserId, newSession);
+        
+        // Proactive Alignment
+        const myId = currentUser.id || 'LOCAL';
+        const peerId = targetUserId || 'REMOTE';
+        if (myId.localeCompare(peerId) < 0) {
+           sendEncryptedPayload(null, `init-proactive-${Date.now()}`, 'text', true);
+        }
+
+        setTimeout(() => {
+          drainMessageQueue();
+          drainOutgoingQueue();
+        }, 100);
+        
         return newSession;
       } catch (err) {
         console.error('[E2EE] Handshake init failed', err);
         throw err;
       } finally {
         initPromiseRef.current = null;
+        isHandshakingRef.current = false;
       }
     };
 
@@ -151,14 +251,25 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     return await initPromiseRef.current;
   };
 
+  const handleWipeE2EE = async () => {
+    if (window.confirm("Cảnh báo: Thao tác này sẽ xóa toàn bộ móng nhà E2EE và làm mới trình duyệt. Tiếp tục?")) {
+      const dbs = await window.indexedDB.databases();
+      for (const db of dbs) {
+        if (db.name !== 'SecureChatDB') continue;
+        window.indexedDB.deleteDatabase(db.name);
+      }
+      window.location.reload();
+    }
+  };
+
   const decryptRatchet = async (msg) => {
     if (msg.isDeleted) return '[Message revoked]';
     try {
-      console.log('[E2EE] Processing incoming encrypted message...');
-
+      console.log(`[E2EE-Receive] New message arrival. Sender: ${msg.senderId}, Index n: ${msg.n}, Handshake present: ${!!msg.senderEk}`);
+      
       // 0. Wait for ongoing handshake if any
       if (initPromiseRef.current) {
-        console.log('[E2EE] Decryption paused, waiting for handshake promise...');
+        console.log('[E2EE-Receive] Decryption paused, waiting for handshake promise...');
         await initPromiseRef.current;
       }
 
@@ -167,19 +278,31 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       const localId = currentUser.id || '';
       const isRemoteHigher = remoteId.localeCompare(localId) > 0;
       const isSameUser = remoteId === localId;
-      const hasLocalInitiatedOnly = !session || (session && session.nextRecvIndex === 0);
-      const shouldAdoptHandshake = msg.senderEk && !isSameUser && hasLocalInitiatedOnly && (isRemoteHigher || !session);
       
-      console.log(`[E2EE-Forensic] ID Comp: Remote=${remoteId.slice(0,8)}, Local=${localId.slice(0,8)}, Result: isRemoteHigher=${isRemoteHigher}`);
-      console.log(`[E2EE-Trace] Adoption Matrix: msg.ek=${!!msg.senderEk}, localOnly=${hasLocalInitiatedOnly}, shouldAdopt=${shouldAdoptHandshake}`);
-
+      console.log(`[AD-Sync] ID_Self: ${localId} ID_Remote: ${remoteId}`);
+      console.log(`[E2EE-Forensic] My ID: ${localId}, Remote ID: ${remoteId}, Decision: ${isRemoteHigher ? "I yield (Responder)" : "I win (Initiator)"}`);
+      
+      // -- Stale Packet Filter --
+      const isStaleHandshake = msg.senderEk && session && session.status === 'ESTABLISHED' && msg.senderEk === session.recvRatchetPublicKey;
+      
+      // -- Handshake Adoption Logic (Standard) --
+      const hasLocalInitiatedOnly = !session || (session && session.nextRecvIndex === 0);
+      const isConflict = session && session.status === 'INITIALIZING' && !isSameUser;
+      
+      const shouldAdoptHandshake = msg.senderEk && !isSameUser && !isStaleHandshake && (hasLocalInitiatedOnly || isConflict) && (isRemoteHigher || !session);
+      
+      console.log(`[E2EE-Forensic] Adoption Matrix: msg.senderEk=${!!msg.senderEk}, isConflict=${isConflict}, isRemoteHigher=${isRemoteHigher}, shouldAdopt=${shouldAdoptHandshake}`);
+      
       if (shouldAdoptHandshake) {
-        console.log(`[E2EE] Tie-breaker: ${isRemoteHigher ? 'Remote wins' : 'Initializing'} responder session...`);
+        console.log(`[E2EE-Orphan] Tie-breaker: ${isRemoteHigher ? 'Remote higher' : 'Initializing'} responder session...`);
         const username = currentUser.username;
         const bobSPK_priv = await getKey(`spk_priv_${username}`);
         const bobIKdh_priv = await getKey(`ik_dh_priv_${username}`);
         const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${username}_${msg.usedOpk}`) : null;
-        if (!bobSPK_priv || !bobIKdh_priv) return null;
+        if (!bobSPK_priv || !bobIKdh_priv) {
+             console.error("[E2EE-Orphan] Critical identity keys missing. Cannot adopt.");
+             return null;
+        }
 
         const { rootKey, sendChainKey, recvChainKey } = await x3dhResponderHandshake(
           bobSPK_priv, bobIKdh_priv, bobOPK_priv,
@@ -187,98 +310,170 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         );
         session = {
           rootKey, sendChainKey, recvChainKey,
-          nextSendIndex: 0, nextRecvIndex: msg.n || 0, skippedMessageKeys: {},
+          nextSendIndex: 0, nextRecvIndex: 0, skippedMessageKeys: {},
           sendRatchetKeyPair: { privateKey: bobSPK_priv, publicKeyBase64: currentUser.signedPreKey || "" },
           recvRatchetPublicKey: msg.ratchetKey || msg.senderEk, 
           pendingSenderEk: null, status: 'ESTABLISHED'
         };
-        console.log('[E2EE] Responder Session initialized with Lockdown Alignment.');
+        console.log('[E2EE-Orphan] Orphan Handshake Adoped. Session Re-aligned.');
         await saveSession(chatUser.id, session);
         sendEncryptedPayload(null, null, 'handshake_ack');
-        // fall through to decryption logic instead of returning null
-      } else if (msg.senderEk && session && session.status === 'INITIALIZING') {
-        if (isRemoteHigher) {
-             console.log("[E2EE] I lost the race (Lower ID). Adopting remote handshake...");
+        
+        // Drain buffered messages after adoption
+        setTimeout(() => drainMessageQueue(), 50);
+      } else if ((msg.senderEk || msg.type === 'handshake_ack') && session && (session.status === 'INITIALIZING' || session.status === 'ESTABLISHED')) {
+        // Winner Alignment/ACK: We receive a handshake or ACK from the peer.
+        if (session.status === 'INITIALIZING') {
+           console.log(`[E2EE-Orphan] ALIGNMENT: Received ${msg.type || 'handshake'} from peer. Transitioning to ESTABLISHED.`);
+           session.status = 'ESTABLISHED';
+           if ((session.nextRecvIndex || 0) === 0) session.nextRecvIndex = 0;
+           if ((session.nextSendIndex || 0) === 0) session.nextSendIndex = 0;
+           await saveSession(chatUser.id, session);
+           console.log('[E2EE-Orphan] State saved as ESTABLISHED. Triggering queue drain.');
+           drainOutgoingQueue();
+        } else if (msg.type === 'handshake_ack') {
+           console.log(`[E2EE-Orphan] Manual ACK received. Draining remaining outgoing messages.`);
+           drainOutgoingQueue();
+        }
+      }
+
+      if (!session) return '[Secure Session Not Established]';
+
+      // -- Atomic Decryption Logic --
+      // We work on a clone (tempSession) and only persist if decryption succeeds.
+      const tempSession = structuredClone(session);
+      
+      // Restore complex objects not handled by JSON.stringify if necessary (Keys are stored as B64 or managed by crypto.js helpers)
+      
+      const isInitialMessage = !!msg.senderEk;
+      const isRotationRequested = msg.ratchetKey && msg.ratchetKey !== tempSession.recvRatchetPublicKey;
+      
+      if (!isInitialMessage && isRotationRequested) {
+        const remotePublicKey = await importX25519Public(msg.ratchetKey);
+        const dhSecret = await window.crypto.subtle.deriveBits({ name: 'X25519', public: remotePublicKey }, tempSession.sendRatchetKeyPair.privateKey, 256);
+        const { newRootKey, newChainKey } = await ratchetRoot(tempSession.rootKey, dhSecret);
+        tempSession.rootKey = newRootKey; 
+        tempSession.recvChainKey = newChainKey;
+        tempSession.recvRatchetPublicKey = msg.ratchetKey; 
+        tempSession.nextRecvIndex = 0;
+        tempSession.sendRatchetKeyPair = await generateX25519KeyPair();
+      }
+
+      let messageKey = null;
+      const targetIndex = msg.n || 0;
+      let safetyCount = 0;
+      const MAX_SKIPPED_KEYS = 100;
+      
+      console.log(`[E2EE-Ratchet] Processing Pipeline: Target Index (n): ${targetIndex}, Current Recv Counter: ${session.nextRecvIndex}`);
+      console.log(`[E2EE-Ratchet] Rotation Required: ${isRotationRequested ? "YES" : "NO"}`);
+      while (tempSession.nextRecvIndex <= targetIndex && safetyCount < 100) {
+        const { nextChainKey, messageKey: derivedKey } = await ratchetChain(tempSession.recvChainKey);
+        tempSession.recvChainKey = nextChainKey; 
+        messageKey = derivedKey;
+        if (tempSession.nextRecvIndex < targetIndex) {
+          const k = `${tempSession.recvRatchetPublicKey}_${tempSession.nextRecvIndex}`;
+          tempSession.skippedMessageKeys[k] = derivedKey; 
+          console.log(`[E2EE-Ratchet] Derived key for future message: ${k}`);
+          
+          // Forward Secrecy: Limit storage of skipped keys
+          const storedKeys = Object.keys(tempSession.skippedMessageKeys);
+          if (storedKeys.length > MAX_SKIPPED_KEYS) {
+            const oldest = storedKeys[0];
+            delete tempSession.skippedMessageKeys[oldest];
+            console.warn(`[ForwardSecrecy] Pruned oldest skipped key to maintain limit: ${oldest}`);
+          }
+        }
+        tempSession.nextRecvIndex++; 
+        safetyCount++;
+      }
+
+      if (!messageKey) {
+        const k = `${tempSession.recvRatchetPublicKey}_${targetIndex}`;
+        console.log(`[E2EE-Ratchet] Attempting recovery from skippedMessageKeys: ${k}`);
+        messageKey = tempSession.skippedMessageKeys[k];
+        if (messageKey) {
+          console.log(`[E2EE-Ratchet] Recovery SUCCESS for key: ${k}`);
+          delete tempSession.skippedMessageKeys[k];
+        } else {
+          throw new Error(`Message key recovery failed for index ${targetIndex}`);
+        }
+      }
+
+      if (msg.type === 'handshake_ack') {
+        await saveSession(chatUser.id, tempSession);
+        return null;
+      }
+      
+      if (!msg.encryptedContent) return null;
+
+      try {
+        const ad = sessionAD;
+        const decrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, messageKey, ad);
+        
+        // SUCCESS: Persist the advanced ratchet state
+        await saveSession(chatUser.id, tempSession);
+        return decrypted;
+      } catch (err) {
+        console.warn('[E2EE] Standard decryption failed, attempting Late Adoption sync...', err.message);
+        
+        // -- Late Adoption (Self-Healing) --
+        // If we have a senderEk (X3DH init) but regular decryption failed, 
+        // it means we might have missed the handshake. Adopt it now.
+        if (msg.senderEk && !isSameUser) {
+             console.log(`[E2EE-LateAdoption] Forced Adoption triggered by failure at index: ${msg.n || 0}`);
              const username = currentUser.username;
              const bobSPK_priv = await getKey(`spk_priv_${username}`);
              const bobIKdh_priv = await getKey(`ik_dh_priv_${username}`);
              const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${username}_${msg.usedOpk}`) : null;
-             if (!bobSPK_priv || !bobIKdh_priv) return null;
-
-             const { rootKey, sendChainKey, recvChainKey } = await x3dhResponderHandshake(
-                bobSPK_priv, bobIKdh_priv, bobOPK_priv,
-                chatUser.dhPublicKey, msg.senderEk
-             );
-             session = {
-                rootKey, sendChainKey, recvChainKey,
-                nextSendIndex: 0, nextRecvIndex: msg.n || 0, skippedMessageKeys: {},
-                sendRatchetKeyPair: { privateKey: bobSPK_priv, publicKeyBase64: currentUser.signedPreKey || "" },
-                recvRatchetPublicKey: msg.ratchetKey || msg.senderEk, 
-                pendingSenderEk: null, status: 'ESTABLISHED'
-             };
-             console.log('[E2EE] Responder Session established via Adoption.');
-             await saveSession(chatUser.id, session);
-             // fall through to decryption
-        } else {
-             console.log(`[E2EE] Winner Alignment: Peer ${remoteId.slice(0,8)} is responding. Transitioning to ESTABLISHED.`);
-             session.status = 'ESTABLISHED';
-             session.nextRecvIndex = msg.n || 0;
-             session.nextSendIndex = 0; 
-             await saveSession(chatUser.id, session);
-             // fall through to decryption
+             
+             if (bobSPK_priv && bobIKdh_priv) {
+               const { rootKey, sendChainKey, recvChainKey } = await x3dhResponderHandshake(
+                 bobSPK_priv, bobIKdh_priv, bobOPK_priv,
+                 chatUser.dhPublicKey, msg.senderEk
+               );
+               
+               // Build fresh late session from scratch
+               const lateSession = {
+                 rootKey, sendChainKey, recvChainKey,
+                 nextSendIndex: 0, nextRecvIndex: 0, skippedMessageKeys: {},
+                 sendRatchetKeyPair: { privateKey: bobSPK_priv, publicKeyBase64: currentUser.signedPreKey || "" },
+                 recvRatchetPublicKey: msg.ratchetKey || msg.senderEk, 
+                 pendingSenderEk: null, status: 'ESTABLISHED',
+                 previousCounter: 0
+               };
+               
+               // CATCH-UP Logic: Loop from 0 to N to recover the correct MessageKey
+               console.log(`[E2EE-LateAdoption] Catching up to index ${msg.n || 0}...`);
+               let catchupKey = null;
+               let catchupChain = recvChainKey;
+               const targetN = msg.n || 0;
+               for (let i = 0; i <= targetN; i++) {
+                 const { nextChainKey, messageKey: mk } = await ratchetChain(catchupChain);
+                 catchupChain = nextChainKey;
+                 catchupKey = mk;
+               }
+               
+               // Try decrypting with recovered key
+               try {
+                 const finalDecrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, catchupKey, sessionAD);
+                 lateSession.recvChainKey = catchupChain;
+                 lateSession.nextRecvIndex = targetN + 1;
+                 await saveSession(chatUser.id, lateSession);
+                 console.log(`[E2EE-LateAdoption] SUCCESS: Caught up to index ${targetN + 1}`);
+                 return finalDecrypted;
+               } catch (e2) {
+                 console.error("[E2EE-LateAdoption] Even Catch-up Late Adoption failed to decrypt.");
+                 return "[Lỗi phiên bản khóa - Không thể giải mã]";
+               }
+             }
         }
-      }
-      if (!session) return '[Secure Session Not Established]';
-      const isInitialMessage = !!msg.senderEk;
-      const isRotationRequested = msg.ratchetKey && msg.ratchetKey !== session.recvRatchetPublicKey;
-      if (!isInitialMessage && isRotationRequested) {
-        const remotePublicKey = await importX25519Public(msg.ratchetKey);
-        const dhSecret = await window.crypto.subtle.deriveBits({ name: 'X25519', public: remotePublicKey }, session.sendRatchetKeyPair.privateKey, 256);
-        const { newRootKey, newChainKey } = await ratchetRoot(session.rootKey, dhSecret);
-        session.rootKey = newRootKey; session.recvChainKey = newChainKey;
-        session.recvRatchetPublicKey = msg.ratchetKey; session.nextRecvIndex = 0;
-        session.sendRatchetKeyPair = await generateX25519KeyPair();
-        await saveSession(chatUser.id, session);
-      }
-      let messageKey = null;
-      const targetIndex = msg.n || 0;
-      let safetyCount = 0;
-      while (session.nextRecvIndex <= targetIndex && safetyCount < 100) {
-        const { nextChainKey, messageKey: derivedKey } = await ratchetChain(session.recvChainKey);
-        session.recvChainKey = nextChainKey; messageKey = derivedKey;
-        if (session.nextRecvIndex < targetIndex) {
-          session.skippedMessageKeys[`${session.recvRatchetPublicKey}_${session.nextRecvIndex}`] = derivedKey; 
-          console.log(`[E2EE] Skipping & Storing Key for index: ${session.nextRecvIndex}`);
-        }
-        session.nextRecvIndex++; safetyCount++;
-      }
-      if (!messageKey) {
-        const k = `${session.recvRatchetPublicKey}_${targetIndex}`;
-        messageKey = session.skippedMessageKeys[k];
-        if (messageKey) delete session.skippedMessageKeys[k];
-        else throw new Error(`Message key recovery failed for index ${targetIndex}`);
-      }
-      await saveSession(chatUser.id, session);
-      if (msg.type === 'handshake_ack') {
-        return null;
-      }
-      if (!msg.encryptedContent) return null;
-      try {
-        const ad = getAD();
-        const decrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, messageKey, ad);
-        return decrypted;
-      } catch (err) {
-        if (msg.senderId === chatUser.id && msg.senderEk) {
-          console.warn('[E2EE] Discarded orphan handshake from conflict. Syncing...');
-          return '[Syncing Session...]'; 
-        }
-        throw err;
+        return "[Phiên bản khóa cũ]";
       }
     } catch (err) {
       if (err.name !== 'OperationError') console.error('[decryptRatchet]', err);
-      if (msg.senderEk) return null; 
+      // Return null for handshake noise or background markers
+      if (msg.senderEk || msg.type === 'handshake_ack') return null; 
       return '[Decryption error]';
-    } finally {
     }
   };
 
@@ -293,9 +488,25 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
       const decrypted = [];
       for (const msg of batch) {
+        // Source of Truth: Check if we have the plaintext cached locally (Forward Secrecy compliant history)
+        let content = await getDecryptedMessage(msg.id);
+        
+        if (content === null) {
+           try {
+             // Fallback: This is a new message or first time on this device. Try decrypting once.
+             content = await decryptRatchet(msg);
+             if (content && typeof content === 'string') {
+               await saveDecryptedMessage(msg.id, content);
+             }
+           } catch (err) {
+             console.warn(`[E2EE-History] Decryption failed for historical message ${msg.id}: ${err.message}`);
+             content = '[Phiên bản khóa cũ - Không thể xem]';
+           }
+        }
+
         decrypted.push({
           ...msg, 
-          decryptedContent: await decryptRatchet(msg)
+          decryptedContent: content
         });
       }
 
@@ -334,31 +545,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
   useEffect(() => {
     if (!socket) return;
-    const onMsg = async (msg) => {
-      if (msg.senderId === currentUser.id) {
-        if (msg.localId) {
-          setMessages((p) => p.map(m => m.id === msg.localId ? { ...m, id: msg.id, status: 'sent' } : m));
-        }
-        return;
-      }
-
-      if (
-        (msg.senderId === chatUser.id && msg.recipientId === currentUser.id)
-      ) {
-        const content = await decryptRatchet(msg);
-        if (content !== null) {
-          setMessages((p) => [...p, { ...msg, decryptedContent: content, status: 'received' }]);
-          setIsTyping(false);
-          socket.emit('markAsRead', { senderId: chatUser.id });
-        }
-      }
-    };
     const onTyping = ({ senderId }) => { if (senderId === chatUser.id) setIsTyping(true); };
     const onStop = ({ senderId }) => { if (senderId === chatUser.id) setIsTyping(false); };
     const onDel = ({ messageId }) => setMessages((p) => p.map((m) => m.id === messageId ? { ...m, isDeleted: true, decryptedContent: '[Message revoked]' } : m));
     const onReact = ({ messageId, reactions }) => setMessages((p) => p.map((m) => m.id === messageId ? { ...m, reactions } : m));
     const onRead = ({ byUserId }) => { if (byUserId === chatUser.id) setMessages((p) => p.map((m) => (!m.readAt && m.senderId === currentUser.id) ? { ...m, readAt: new Date().toISOString() } : m)); };
     socket.on('newMessage', onMsg);
+    socket.on('handshake_ack', onMsg);
     socket.on('typing', onTyping);
     socket.on('stopTyping', onStop);
     socket.on('messageDeleted', onDel);
@@ -366,17 +559,45 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     socket.on('messagesRead', onRead);
     return () => {
       socket.off('newMessage', onMsg);
+      socket.off('handshake_ack', onMsg);
       socket.off('typing', onTyping);
       socket.off('stopTyping', onStop);
       socket.off('messageDeleted', onDel);
       socket.off('messageReacted', onReact);
       socket.off('messagesRead', onRead);
     };
-  }, [socket, chatUser, currentUser.id]);
+  }, [socket, chatUser, currentUser.id, onMsg]);
 
-  const sendEncryptedPayload = async (text, localId, type = 'text') => {
+  const sendEncryptedPayload = async (text, localId, type = 'text', isRetry = false) => {
     try {
-      let session = await getOrInitSession(chatUser.id);
+      // 1. Initial State
+      let session = await loadSession(chatUser.id);
+      
+      // -- Buffering Logic --
+      console.log(`[TX-Step] Attempting n=${session?.nextSendIndex || 0} isRetry=${isRetry} status=${session?.status || 'NONE'}`);
+      
+      if (!isRetry) {
+        const isInitializing = session && session.status === 'INITIALIZING';
+        const isAck = type === 'handshake_ack';
+        
+        if (isHandshakingRef.current || (isInitializing && !isAck) || !session) {
+          console.log(`[E2EE-Queue] Buffering message. localId: ${localId}`);
+          outgoingQueueRef.current.push({ text, localId });
+          
+          if (!session && !isHandshakingRef.current) {
+            console.log('[E2EE] Initializing session via first message trigger...');
+            getOrInitSession(chatUser.id);
+          }
+          return;
+        }
+      }
+
+      // -- Sending Logic (Only reached if isRetry=true or session is ESTABLISHED) --
+      if (!session) {
+        console.error('[E2EE] Fatal: Attempted to send without session, and logic bypass failed.');
+        return;
+      }
+
       if (!session || !session.sendRatchetKeyPair) {
         console.error('[E2EE] Fatal: Session or Ratchet Key missing. Cannot send.');
         return '[Encryption Failed]';
@@ -402,6 +623,27 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         currentRatchetPub = session.sendRatchetKeyPair.publicKeyBase64;
       }
 
+      // 1b. Proactive DH Ratchet (Forward Secrecy & Key Refresh)
+      const MAX_SYMMETRIC_STEPS = 16;
+      const shouldProactivelyRotate = (session.nextSendIndex || 0) >= MAX_SYMMETRIC_STEPS;
+      
+      if (shouldProactivelyRotate) {
+        console.log(`[DoubleRatchet] MAX SYMMETRIC STEPS (${MAX_SYMMETRIC_STEPS}) reached. Forcing DH Rotation...`);
+        const remotePublicKey = await importX25519Public(session.recvRatchetPublicKey);
+        const dhSecret = await window.crypto.subtle.deriveBits(
+          { name: 'X25519', public: remotePublicKey },
+          session.sendRatchetKeyPair.privateKey, 256
+        );
+        const { newRootKey, newChainKey } = await ratchetRoot(session.rootKey, dhSecret);
+        
+        session.rootKey = newRootKey;
+        session.sendChainKey = newChainKey;
+        session.previousCounter = session.nextSendIndex;
+        session.nextSendIndex = 0;
+        session.sendRatchetKeyPair = await generateX25519KeyPair();
+        currentRatchetPub = session.sendRatchetKeyPair.publicKeyBase64;
+      }
+
       const baseChainKey = session.sendChainKey;
       if (!baseChainKey) {
         console.error('[E2EE] Fatal: sendChainKey is null. Sync failure.');
@@ -414,20 +656,41 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       const currentIndex = session.nextSendIndex || 0;
       session.nextSendIndex = currentIndex + 1;
       
+      // -- OPTIMISTIC UI --
+      // Update state and persistent store immediately so the sender sees the message.
+      if (text) {
+        const optimisticMsg = {
+          id: localId,
+          senderId: currentUser.id,
+          recipientId: chatUser.id,
+          decryptedContent: text,
+          status: 'sending',
+          createdAt: new Date().toISOString()
+        };
+        setMessages((p) => [...p, optimisticMsg]);
+        await saveDecryptedMessage(localId, text);
+      }
+
       console.log(`[E2EE] Encrypting message with sender index: ${currentIndex}`);
       
       let ciphertextB64 = null, ivB64 = null;
       if (text !== null && text !== undefined) {
-        const ad = getAD();
-        const encrypted = await encryptMessageGCM(text, messageKey, ad);
+        const encrypted = await encryptMessageGCM(text, messageKey, sessionAD);
         ciphertextB64 = encrypted.ciphertextB64; ivB64 = encrypted.ivB64;
       }
 
       // Restore handshake metadata for self-healing
-      const senderEk = session.pendingSenderEk || null;
-      const usedOpk = session.pendingUsedOpk || null;
+      // IMPORTANT: If we are INITIALIZING, we MUST include our senderEk (Handshake Carrier)
+      const needsHandshake = session.status === 'INITIALIZING' || session.nextSendIndex <= 1;
+      const senderEk = needsHandshake ? (session.pendingSenderEk || null) : null;
+      const usedOpk = needsHandshake ? (session.pendingUsedOpk || null) : null;
+      
+      if (needsHandshake) {
+        console.log(`[E2EE-Send] Attaching handshake carrier (senderEk present: ${!!senderEk}) to message n=${currentIndex}`);
+      }
 
       // 2. Transmit
+      console.log(`[E2EE-Send] Emitting payload to socket. LocalId: ${localId}, Index n: ${currentIndex}, Handshake: ${needsHandshake}`);
       socket.emit((type === 'handshake_ack' ? 'handshake_ack' : 'sendMessage'), {
         recipientId: chatUser.id,
         encryptedContent: ciphertextB64,
@@ -441,10 +704,9 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         localId: localId,
       });
 
-      
       await saveSession(chatUser.id, session);
     } catch (err) {
-      console.error('[sendEncryptedPayload]', err);
+      console.error('[E2EE-Send] Failed to send payload:', err);
       alert('Cannot send: ' + err.message);
     }
   };
@@ -466,7 +728,6 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       id: localId, senderId: currentUser.id, recipientId: chatUser.id,
       decryptedContent: t, createdAt: new Date().toISOString(), status: 'sending',
     };
-    setMessages((p) => [...p, optimisticMsg]);
     await sendEncryptedPayload(t, localId);
   };
 
@@ -532,18 +793,23 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     // Negotiate X3DH session immediately on mount if none exists.
     const autoInit = async () => {
       if (autoInitRef.current.has(chatUser.id) || isHandshakingRef.current) return;
-      isHandshakingRef.current = true;
-      autoInitRef.current.add(chatUser.id);
-
+      
       try {
         const existing = await loadSession(chatUser.id);
-        if (!existing) {
+        if (existing && existing.status === 'ESTABLISHED') {
+          console.log("[E2EE] Phiên đã ESTABLISHED, chặn đứng auto-handshake.");
+          autoInitRef.current.add(chatUser.id);
+          return;
+        }
+
+        if (!existing || existing.status !== 'INITIALIZING') {
+          isHandshakingRef.current = true;
+          autoInitRef.current.add(chatUser.id);
           console.log(`[E2EE] Proactively negotiating silent session with ${chatUser.id}...`);
           await sendEncryptedPayload(null, `init-${Date.now()}`);
         }
       } catch (e) { 
-        console.warn('[E2EE] Auto-init failed', e); 
-        autoInitRef.current.delete(chatUser.id);
+        console.error("[E2EE] Auto-init failed", e);
       } finally {
         isHandshakingRef.current = false;
       }
@@ -576,6 +842,9 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={handleWipeE2EE} title="Wipe E2EE State" className="w-9 h-9 rounded-full flex items-center justify-center text-red-400 hover:bg-red-500/10 transition-colors">
+            <Trash2 className="w-5 h-5" />
+          </button>
           <button onClick={() => callUser(chatUser.id, false)} className="w-10 h-10 rounded-full flex items-center justify-center text-indigo-500 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
             <Phone className="w-5 h-5" />
           </button>
