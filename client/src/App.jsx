@@ -9,7 +9,7 @@ import { clearKeyStore } from './utils/keyStore';
 import RestoreKeyModal from './components/RestoreKeyModal';
 
 const PrivateRoute = ({ children }) => {
-  const { token, loading, needsPinRestore } = useAuth();
+  const { token, loading, needsPassphraseRestore } = useAuth();
   if (loading) return null;
   
   if (!token) return <Navigate to="/login" replace />;
@@ -17,7 +17,7 @@ const PrivateRoute = ({ children }) => {
   return (
     <>
       {children}
-      {needsPinRestore && <RestoreKeyModal />}
+      {needsPassphraseRestore && <RestoreKeyModal />}
     </>
   );
 };

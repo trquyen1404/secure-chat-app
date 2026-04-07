@@ -1,8 +1,5 @@
 const { Op } = require('sequelize');
-const Group = require('../models/Group');
-const GroupMember = require('../models/GroupMember');
-const GroupMessage = require('../models/GroupMessage');
-const User = require('../models/User');
+const { Group, GroupMember, GroupMessage, User } = require('../models');
 
 /**
  * Create a new group.

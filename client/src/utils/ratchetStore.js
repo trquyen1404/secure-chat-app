@@ -1,14 +1,15 @@
-/**
- * ratchetStore.js — Persistent Storage for Double Ratchet States & Skipped Keys
- */
+import { encryptData, decryptData, serializeSession, deserializeSession } from './crypto';
 
 const DB_NAME = 'secure-chat-ratchet';
-const DB_VERSION = 2; // Incremented for message store
+const DB_VERSION = 2;
 const STORE_SESSIONS = 'sessions';
-const STORE_SKIPPED_KEYS = 'skipped_keys';
 const STORE_MESSAGES = 'decrypted_messages';
 
+let dbHandle = null;
+
 export async function initRatchetDB() {
+  if (dbHandle) return dbHandle;
+  
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (event) => {
@@ -20,80 +21,193 @@ export async function initRatchetDB() {
         db.createObjectStore(STORE_MESSAGES, { keyPath: 'id' });
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      dbHandle = request.result;
+      // [Security] Handle unexpected closure
+      dbHandle.onversionchange = () => {
+        dbHandle.close();
+        dbHandle = null;
+      };
+      resolve(dbHandle);
+    };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function saveSession(userId, state) {
+export function closeRatchetDB() {
+  if (dbHandle) {
+    dbHandle.close();
+    dbHandle = null;
+    console.debug('[STORE] RatchetDB connection closed.');
+  }
+}
+
+/**
+ * Saves a session state. Encrypts if masterKey is provided.
+ */
+export async function saveSession(userId, state, masterKey = null) {
   const db = await initRatchetDB();
+  let dataToSave = { userId, ...state };
+
+  if (masterKey) {
+    // [Fix] Serialize CryptoKeys to JWK before JSON.stringify
+    const serialized = await serializeSession(state);
+    const encrypted = await encryptData(JSON.stringify(serialized), masterKey);
+    dataToSave = { userId, encrypted };
+    console.debug(`[STORE] Session for ${userId} saved (ENCRYPTED + SERIALIZED)`);
+  } else {
+    console.warn(`[STORE] Session for ${userId} saved (PLAIN TEXT - NO MASTER KEY)`);
+  }
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_SESSIONS, 'readwrite');
     const store = transaction.objectStore(STORE_SESSIONS);
-    store.put({ userId, ...state });
+    store.put(dataToSave);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
 }
 
-export async function loadSession(userId) {
+/**
+ * Loads a session state. Decrypts if masterKey is provided.
+ */
+export async function loadSession(userId, masterKey = null) {
   const db = await initRatchetDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_SESSIONS, 'readonly');
     const store = transaction.objectStore(STORE_SESSIONS);
     const request = store.get(userId);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
+    request.onsuccess = async () => {
+      const result = request.result;
+      if (!result) return resolve(null);
 
-export async function storeSkippedKey(userId, ratchetKey, n, key) {
-  const db = await initRatchetDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_SKIPPED_KEYS, 'readwrite');
-    const store = transaction.objectStore(STORE_SKIPPED_KEYS);
-    store.put({ userId, ratchetKey, n, key });
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-}
-
-export async function getAndDeleteSkippedKey(userId, ratchetKey, n) {
-  const db = await initRatchetDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_SKIPPED_KEYS, 'readwrite');
-    const store = transaction.objectStore(STORE_SKIPPED_KEYS);
-    const request = store.get([userId, ratchetKey, n]);
-    request.onsuccess = () => {
-      if (request.result) {
-        store.delete([userId, ratchetKey, n]);
-        resolve(request.result.key);
+      if (result.encrypted && masterKey) {
+        try {
+          const decrypted = await decryptData(result.encrypted.ciphertextB64, result.encrypted.ivB64, masterKey);
+          const serialized = JSON.parse(decrypted);
+          // [Fix] Restore CryptoKeys from JWK
+          const session = await deserializeSession(serialized);
+          resolve({ userId, ...session });
+        } catch (e) {
+          console.error(`[STORE] Failed to decrypt/deserialize session for ${userId}`, e);
+          resolve(null);
+        }
       } else {
-        resolve(null);
+        resolve(result);
       }
     };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function saveDecryptedMessage(id, content) {
+/**
+ * Saves a decrypted message. Encrypts content if masterKey is provided.
+ */
+export async function saveDecryptedMessage(id, contentOrObj, masterKey = null) {
   const db = await initRatchetDB();
+  
+  // Handle both legacy (just content string) and modern (metadata object) calls
+  const isObject = typeof contentOrObj === 'object' && contentOrObj !== null && !ArrayBuffer.isView(contentOrObj);
+  const content = isObject ? (contentOrObj.text || contentOrObj.content) : contentOrObj;
+  
+  let dataToSave = { 
+    id, 
+    content, 
+    timestamp: isObject ? (contentOrObj.timestamp || Date.now()) : Date.now(),
+    senderId: isObject ? contentOrObj.senderId : null,
+    recipientId: isObject ? contentOrObj.recipientId : null
+  };
+
+  if (masterKey && content) {
+    const encrypted = await encryptData(content, masterKey);
+    dataToSave = { ...dataToSave, encrypted, content: null };
+    console.debug(`[STORE] Message ${id} saved (ENCRYPTED with Metadata)`);
+  }
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
     const store = transaction.objectStore(STORE_MESSAGES);
-    store.put({ id, content, timestamp: Date.now() });
+    store.put(dataToSave);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
 }
 
-export async function getDecryptedMessage(id) {
+/**
+ * Rapidly restores a collection of messages within a single transaction.
+ * [Performance] Parallelizes encryption before the transaction starts to avoid blocking the DB.
+ */
+export async function bulkSaveMessages(messages, masterKey = null, onProgress = null) {
+  if (!messages || messages.length === 0) return;
+  const db = await initRatchetDB();
+
+  // 1. Pre-process (Encrypt) in parallel outside the transaction for max efficiency
+  const total = messages.length;
+  const processedData = await Promise.all(messages.map(async (msg, idx) => {
+    const { id, content, encrypted, ...meta } = msg;
+    const finalContent = content || msg.text;
+    
+    let toSave = { 
+      id, 
+      content: finalContent, 
+      timestamp: msg.timestamp || Date.now(),
+      senderId: msg.senderId || null,
+      recipientId: msg.recipientId || null
+    };
+
+    // If already encrypted (from vault sync), just pass it through
+    if (encrypted) {
+       toSave = { ...toSave, encrypted, content: null };
+    } else if (masterKey && finalContent) {
+       // Otherwise, encrypt now
+       const encData = await encryptData(finalContent, masterKey);
+       toSave = { ...toSave, encrypted: encData, content: null };
+    }
+    
+    if (onProgress && idx % 10 === 0) onProgress(Math.floor((idx / total) * 100));
+    return toSave;
+  }));
+
+  // 2. Perform Single Transaction Write
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    
+    for (const data of processedData) {
+      store.put(data);
+    }
+
+    transaction.oncomplete = () => {
+      if (onProgress) onProgress(100);
+      console.log(`[STORE] Bulk write successful: ${messages.length} messages.`);
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function getDecryptedMessage(id, masterKey = null) {
   const db = await initRatchetDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_MESSAGES, 'readonly');
     const store = transaction.objectStore(STORE_MESSAGES);
     const request = store.get(id);
-    request.onsuccess = () => resolve(request.result?.content || null);
+    request.onsuccess = async () => {
+      const result = request.result;
+      if (!result) return resolve(null);
+
+      if (result.encrypted && masterKey) {
+        try {
+          const decrypted = await decryptData(result.encrypted.ciphertextB64, result.encrypted.ivB64, masterKey);
+          resolve(decrypted);
+        } catch (e) {
+          console.error(`[STORE] Failed to decrypt message ${id}`, e);
+          resolve(null);
+        }
+      } else {
+        resolve(result.content || null);
+      }
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -119,9 +233,39 @@ export async function updateDecryptedMessageId(oldId, newId) {
 }
 
 export async function clearRatchetDB() {
+  closeRatchetDB();
   return new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(DB_NAME);
-    request.onsuccess = () => resolve();
+    request.onsuccess = () => {
+      console.log(`[STORE] RatchetDB cleared.`);
+      resolve();
+    };
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => {
+      console.warn('[STORE] RatchetDB deletion BLOCKED. Retrying after delay...');
+      // If blocked, wait and resolve anyway so logout continues
+      setTimeout(resolve, 2000);
+    };
+  });
+}
+
+export async function getAllSessions() {
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SESSIONS, 'readonly');
+    const store = transaction.objectStore(STORE_SESSIONS);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+export async function getAllMessages() {
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readonly');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }

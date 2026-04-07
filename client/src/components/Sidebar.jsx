@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import api from '../utils/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { LogOut, Search, ShieldCheck, Moon, Sun } from 'lucide-react';
+import { LogOut, Search, ShieldCheck, Moon, Sun, Trash2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { clearRatchetDB } from '../utils/ratchetStore';
+import { clearKeyStore } from '../utils/keyStore';
 
 const Sidebar = ({ selectedUser, onSelectUser }) => {
   const [users, setUsers] = useState([]);
@@ -11,6 +13,16 @@ const Sidebar = ({ selectedUser, onSelectUser }) => {
   const { token, logout, user } = useAuth();
   const { onlineUsers } = useSocket();
   const { theme, toggleTheme } = useTheme();
+
+  const handleWipeData = async () => {
+    if (window.confirm('CẢNH BÁO: Thao tác này sẽ xóa toàn bộ khóa và lịch sử chat trên máy này. Tiếp tục?')) {
+      console.log('[WIPE] Clearing all local security data...');
+      await clearRatchetDB();
+      await clearKeyStore();
+      logout();
+      window.location.reload();
+    }
+  };
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -38,7 +50,7 @@ const Sidebar = ({ selectedUser, onSelectUser }) => {
              <div className="absolute top-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-slate-900 translate-x-1 -translate-y-1"></div>
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200 truncate max-w-[120px]">{user?.username}</h2>
+            <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200 truncate max-w-[100px]">{user?.username}</h2>
             <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium tracking-wide">E2E Secured</p>
           </div>
         </div>
@@ -51,8 +63,16 @@ const Sidebar = ({ selectedUser, onSelectUser }) => {
             {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
           <button 
+            onClick={handleWipeData}
+            className="p-2 text-gray-500 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800/50 rounded-lg transition-all"
+            title="Xóa Dữ liệu & Reset"
+          >
+            <Trash2 className="w-5 h-5" />
+          </button>
+          <button 
             onClick={logout}
             className="p-2 text-gray-500 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800/50 rounded-lg transition-all"
+            title="Đăng xuất"
           >
             <LogOut className="w-5 h-5" />
           </button>

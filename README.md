@@ -4,74 +4,68 @@ Chào mừng bạn đến với tài liệu tổng hợp về cấu trúc bảo 
 
 ---
 
-## 🚀 III. Cải tiến Mới nhất: Phiên bản v19.2 (Final Alignment)
+## 🚀 III. Cải tiến Hệ thống Toàn diện: Phiên bản v19.3 (Systemic Sweep)
 
-Đây là bản cập nhật "Dứt điểm" để đảm bảo tính ổn định tuyệt đối trong mọi điều kiện mạng:
+Bản cập nhật này tập trung vào tính **Bền bỉ (Reliability)**, **Khả năng phục hồi (Recovery)** và **Bảo mật Đa lớp (Defense-in-Depth)**:
 
-### 1. Chuẩn hóa AD (Associated Data) Toàn diện
-*   **Vấn đề:** MAC Mismatch do lệch thứ tự String ID khi tạo lớp xác thực.
-*   **Giải pháp:** Di chuyển logic tạo AD vào lõi `crypto.js`. Mọi chuỗi xác thực hiện nay đều được `sort()` trước khi nối, đảm bảo Alpha và Beta luôn có chung một "ngôn ngữ xác thực" duy nhất.
+### 1. Khóa Bất đồng bộ (Async Mutex - FIFO Queue)
+*   **Vấn đề:** Các thao tác ghi đè Session (Ratchet state) xảy ra đồng thời khi nhận/gửi tin nhắn dồn dập, dẫn đến hỏng "bánh răng" mã hóa.
+*   **Giải pháp:** Triển khai cơ chế **Sequential Processing Queue** trong `ChatWindow.jsx`. Mọi hành động thay đổi trạng thái mật mã (Encrypt/Decrypt/Rotate) đều phải xếp hàng đợi, đảm bảo tính nguyên tử (Atomicity).
 
-### 2. Đồng bộ Counter Nguyên tử (Atomic Ratchet Sync)
-*   **Vấn đề:** Lệch chỉ số tin nhắn (index desync) khi một bên gửi dồn dập lúc khởi tạo.
-*   **Giải pháp:** Khi bên ID thấp thực hiện "nhường" (Adopt), hệ thống tự động đồng bộ `nextRecvIndex` theo đúng số thứ tự tin nhắn (`msg.n`) của người gửi. Điều này triệt tiêu hoàn toàn lỗi "loạn nhịp" chuỗi băm.
+### 2. Thu hồi Token Tức thì (Global Revocation)
+*   **Công nghệ:** **Token Versioning**.
+*   **Giải pháp:** Middleware `auth.js` kiểm tra `tokenVersion` trong DB trên mỗi yêu cầu. Khi người dùng đổi mật khẩu hoặc thực hiện "Global Logout", version này tăng lên, lập tức vô hiệu hóa mọi Access Token cũ đang lưu hành.
 
-### 3. Giải mã Tuần tự (Sequential Decryption)
-*   **Vấn đề:** Giải mã song song (`Promise.all`) gây tranh chấp và hỏng trạng thái Session Store.
-*   **Giải pháp:** Chuyển sang cơ chế giải mã tuần tự. Đảm bảo mỗi tin nhắn đều chờ tin nhắn trước đó xoay khóa xong mới bắt đầu xử lý, bảo vệ toàn vẹn chuỗi Double Ratchet.
+### 3. Hệ thống Chặn "Tàng hình" (Stealth Blocking)
+*   **Vấn đề:** Chặn ở Client chỉ là che mắt UI; hacker có thể dùng script tấn công trực tiếp.
+*   **Giải pháp:** Thực thi chặn tại **Backend (Socket & Controller)**. Tin nhắn từ người bị chặn sẽ bị server âm thầm loại bỏ mà không báo lỗi cho kẻ gửi, tránh để lộ dấu vết trạng thái chặn.
 
----
-
-## 🚀 II. Các Cải tiến của v19.1 (Recon Stability)
-
-## 🛡️ I. Các Lỗ hổng Bảo mật Đã Được Khắc Phục (Vulnerability Fixes)
-*(Nội dung giữ nguyên như cấu trúc cũ nhưng đã được tinh lọc)*
-
-### 1. Rò rỉ Dữ liệu trên Máy chủ (Server-side Data Breach)
-*   **Giải pháp (E2EE):** Tin nhắn được mã hóa trực tiếp bằng **AES-256-GCM** trên trình duyệt trước khi gửi. Máy chủ chỉ lưu trữ Ciphertext vô định hình.
-
-### 2. Nguy cơ trộm Khóa từ lỗ hổng XSS
-*   **Giải pháp:** Khóa cá nhân (Private Key) được lưu dưới dạng non-extractable CryptoKey trực tiếp vào **IndexedDB**. Kịch bản XSS không thể đọc trộm khóa dưới dạng văn bản.
-
-### 3. Tấn công Padding Oracle & Toàn vẹn dữ liệu
-*   **Giải pháp:** Sử dụng **AES-GCM** kèm Authentication Tag. Mọi thay đổi dù chỉ 1 bit trên đường truyền sẽ bị phát hiện và từ chối giải mã ngay lập tức.
+### 4. Chống Tấn công Từ chối Dịch vụ (DoS Protection)
+*   **Giới hạn Payload:** Cấu hình `express.json({ limit: '1mb' })` để ngăn chặn việc tải lên các khối dữ liệu khổng lồ phá hoại bộ nhớ server (đặc biệt là Vault Data).
+*   **Validation Startup:** Hệ thống từ chối khởi động nếu thiếu bất kỳ biến môi trường mật mã nào (`JWT_SECRET`, `JWT_REFRESH_SECRET`, v.v.).
 
 ---
 
-## ⚡ II. Nâng cấp Công nghệ (Tech Stack Overhaul)
+## 🛡️ I. Các Lỗ hổng Bảo mật Đã Được Khắc Phục (Defense-in-Depth)
 
-### Chuỗi 1: Lưu trữ & Xử lý Dữ liệu
-*   **PostgreSQL**: Database ổn định, hiệu năng cao.
-*   **Sequelize (ORM)**: Quản lý dữ liệu qua Object, chống SQL Injection tự động.
-*   **Zod**: Validation Engine bắt chẹt từng kiểu dữ liệu đầu vào.
+### 1. Rò rỉ Dữ liệu trên Máy chủ (Zero-Knowledge Storage)
+*   **Giải pháp:** Toàn bộ nội dung chat và khóa phiên được mã hóa **AES-256-GCM** trước khi rời khỏi trình duyệt. Máy chủ là "Zero-Knowledge", không thể đọc được nội dung dù có quyền truy cập Database.
 
-### Chuỗi 2: Giao tiếp & Mật mã học
-*   **Socket.io**: Giao tiếp Real-time 2 chiều siêu tốc.
-*   **Web Crypto API**: Sức mạnh mã hóa gốc của trình duyệt (ECDSA, X25519, AES-GCM, HKDF).
-*   **IndexedDB**: Lưu trữ khóa mật mã bảo mật cao, chống extract.
+### 2. Nguy cơ trộm Khóa từ lỗ hổng XSS (Non-Extractable Keys)
+*   **Giải pháp:** Identity Keys được lưu vào **IndexedDB** dưới dạng `extractable: false`. Kịch bản XSS lén lút chạy script không thể trích xuất khóa thô ra khỏi bộ nhớ bảo mật của trình duyệt.
 
-### Chuỗi 3: Quản lý Phiên (Session) & UI
-*   **JWT & Http-Only Cookies**: Tách biệt Access Token và Refresh Token để bảo vệ phiên đăng nhập khỏi XSS.
-*   **Axios Interceptor**: Tự động làm mới Token âm thầm, không ngắt quãng trải nghiệm.
-*   **React + Vite + TailwindCSS**: Bộ ba công nghệ giao diện hiện đại nhất giúp UI/UX mượt mà, sang trọng.
+### 3. Forward Secrecy & Key Burning
+*   **Giới hạn Khóa Skipped:** Chỉ lưu tối đa 100 khóa tin nhắn bị nhỡ để tránh tràn bộ nhớ và giới hạn rủi ro nếu một khóa cũ bị lộ.
+*   **Key Burning:** Khóa tin nhắn được xóa sạch khỏi RAM ngay sau khi giải mã thành công (Ephemeral Message Keys).
+
+---
+
+## ⚡ II. Danh mục Công nghệ Bảo mật (Security Tech Stack)
+
+### 🔐 Mật mã học (Cryptography)
+*   **X3DH (Extended Triple Diffie-Hellman)**: Thỏa thuận khóa ban đầu an toàn tuyệt đối.
+*   **Double Ratchet Protocol**: Tự động xoay khóa sau mỗi tin nhắn gửi/nhận, đảm bảo lộ một khóa không làm lộ toàn bộ lịch sử.
+*   **PBKDF2 (SHA-256)**: Phái sinh **Master Key** từ mã PIN người dùng với 100,000 vòng lặp.
+*   **JWK (JSON Web Key)**: Chuẩn hóa việc đóng gói và lưu trữ `CryptoKey` lên Cloud Vault mà không mất metadata.
+
+### 🌐 Mạng & Giao thức (Network & Protocols)
+*   **JWT Access (15m) & Refresh Token (7d)**: Cơ chế xoay vòng phiên đăng nhập an toàn.
+*   **HTTPOnly Cookies**: Chống trộm Refresh Token qua các cuộc tấn công script.
+*   **Helmet & CORS**: Bảo vệ Header và kiểm soát nguồn gốc truy cập nghiêm ngặt.
+*   **BCRYPT (10 rounds)**: Băm mật khẩu người dùng với muối (salt) ngẫu nhiên.
 
 ---
 
 ## 🔐 IV. Tuyến Mã hóa Mật mã Cốt lõi (Cryptography Pipeline)
 
-1.  **ECDSA (P-256)**: Tạo Identity Key để ký điện tử, xác thực thân phận.
-2.  **X25519 (ECDH)**: Trao đổi khóa Diffie-Hellman bí mật mà không cần gửi Private Key.
-3.  **HKDF (SHA-256)**: Tinh chế Secret từ ECDH thành khóa 256-bit chuẩn mật mã hỗn loạn cao.
-4.  **AES-GCM (v19.1 AD Sync)**: Đóng gói tin nhắn kèm ID người tham gia (Associated Data) để bảo vệ toàn vẹn tuyệt đối.
+1.  **ECDSA (P-256)**: Identity Key phục vụ ký số xác thực thực thể.
+2.  **X25519 (ECDH)**: Trao đổi bí mật Diffie-Hellman trên đường cong Elliptic.
+3.  **HKDF (SHA-256)**: Hàm phái sinh khóa để tinh chế Secret thành khóa đối xứng AES.
+4.  **AES-256-GCM**: Mã hóa dữ liệu khối kèm AD (Associated Data) để bảo vệ toàn vẹn (Integrity).
 
 ---
-*Tài liệu này được cập nhật vào ngày 04/04/2026 bởi hệ thống Antigravity - E2EE Absolute Stability Phase.*
- B lấy (Private B + Public A), cuối cùng cả màn hình tính toán của 2 người đều sẽ ra CÙNG MỘT SỐ GIỐNG HỆT NHAU (Shared Secret) mà hoàn toàn không bao giờ phải gửi lọt lộ Private key của riêng họ lên internet tĩnh.
-    *   **Điểm yếu:** Điểm yếu chí mạng của Diffie-Hellman là con số "Shared Secret" sinh ra vốn dĩ là một tọa độ hình học điểm giao nhau trên đường cong Elliptic. Vì thế chuỗi bit của nó bị thiên lệch, không đủ tính hỗn loạn ngẫu nhiên hoàn hảo để nạp thẳng trực tiếp vào hệ thống mã hóa dữ liệu cơ sở.
-    *   **Công nghệ khắc phục:** **HKDF**.
-*   **HKDF (HMAC-based Key Derivation Function)**
-    *   **Dùng ở đâu:** Trạm tinh chế khóa trung gian giữa bước Trao đổi ECDH và bộ mã hóa dữ liệu văn bản.
-    *   **Điểm mạnh:** Cỗ máy ép xung hỗn loạn cực độ. Nó "Chiết xuất" (Extract) phần bit tinh túy trút bỏ cấu trúc hình học lộn xộn của Secret gốc. Sau đó "Giãn nở" (Expand) dòng dữ phễu đó ra thành một chuỗi bit (VD: 256-bit) chuẩn độ dài siêu ngẫu nhiên đanh thép và không thể dịch ngược bằng toán học được, tỷ lệ phá mã vô hiệu.
+*Tài liệu này được cập nhật vào ngày 07/04/2026 bởi hệ thống Antigravity - Systemic Sweep & Security Audit Phase.*
+ lệ phá mã vô hiệu.
     *   **Điểm yếu:** Bản thân HKDF cũng chỉ là một "nhà máy máy tiện rèn chìa khóa", sức mạnh của nó dừng lại ở việc cấp chìa, chứ nó hoàn toàn không có túi lưu trữ nội dung và không trực tiếp đóng gói thay thế (Mã hóa) ổ khóa vào file văn bản được.
     *   **Công nghệ khắc phục:** **AES-GCM**.
 *   **AES-GCM (Advanced Encryption Standard - Tiêu chuẩn GCM)**

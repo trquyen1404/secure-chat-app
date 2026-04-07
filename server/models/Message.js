@@ -1,6 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User');
 
 const Message = sequelize.define('Message', {
   id: {
@@ -11,12 +10,10 @@ const Message = sequelize.define('Message', {
   senderId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: { model: User, key: 'id' }
   },
   recipientId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: { model: User, key: 'id' }
   },
   encryptedContent: {
     type: DataTypes.TEXT,
@@ -86,11 +83,11 @@ const Message = sequelize.define('Message', {
   ]
 });
 
-User.hasMany(Message, { as: 'SentMessages', foreignKey: 'senderId' });
-User.hasMany(Message, { as: 'ReceivedMessages', foreignKey: 'recipientId' });
-Message.belongsTo(User, { as: 'Sender', foreignKey: 'senderId' });
-Message.belongsTo(User, { as: 'Recipient', foreignKey: 'recipientId' });
-Message.hasMany(Message, { as: 'Replies', foreignKey: 'replyToId' });
-Message.belongsTo(Message, { as: 'ReplyTo', foreignKey: 'replyToId' });
+Message.associate = (models) => {
+  Message.belongsTo(models.User, { as: 'Sender', foreignKey: 'senderId' });
+  Message.belongsTo(models.User, { as: 'Recipient', foreignKey: 'recipientId' });
+  Message.hasMany(models.Message, { as: 'Replies', foreignKey: 'replyToId' });
+  Message.belongsTo(models.Message, { as: 'ReplyTo', foreignKey: 'replyToId' });
+};
 
 module.exports = Message;

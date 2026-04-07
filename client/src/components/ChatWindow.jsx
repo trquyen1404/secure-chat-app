@@ -36,7 +36,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const { token, user: currentUser } = useAuth();
+  const { token, user: currentUser, masterKey } = useAuth();
   const { socket, onlineUsers } = useSocket();
   const { callUser } = useCall();
   const messagesEndRef = useRef(null);
@@ -131,7 +131,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
             const hasText = content && typeof content === 'string' && content.trim() !== '';
             
             if (hasText) {
-              await saveDecryptedMessage(msg.id, content);
+              await saveDecryptedMessage(msg.id, content, masterKey);
               setMessages((p) => {
                 if (p.some(m => m.id === msg.id)) return p;
                 return [...p, { ...msg, decryptedContent: content, status: 'received' }];
@@ -140,6 +140,10 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
             
             setIsTyping(false);
             socket?.emit('markAsRead', { senderId: chatUser.id });
+
+            // Vault Sync Trigger
+            const { debouncedUploadVault } = await import('../utils/vaultSyncService');
+            debouncedUploadVault(masterKey);
           }
         } catch (err) {
           console.error(`[E2EE-Error] Type: ${err.name} Msg: ${err.message}`);
@@ -189,7 +193,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           return null;
         }
         isHandshakingRef.current = true;
-        let session = await loadSession(targetUserId);
+        let session = await loadSession(targetUserId, masterKey);
         if (session) return session;
 
         console.log(`[X3DH-Audit] Initiator (Alice) Start with ${targetUserId}`);
@@ -211,7 +215,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         if (!bundle || !bundle.signedPreKey) throw new Error(`Failed to fetch peer bundle: ${lastErr?.message}`);
         
         const username = currentUser.username;
-        const ikDh_priv = await getKey(`ik_dh_priv_${username}`);
+        const ikDh_priv = await getKey(`ik_dh_priv_${currentUser.id}`, masterKey);
         if (!ikDh_priv) throw new Error('Identity Key not found. Please re-login.');
 
         const ek = await generateX25519KeyPair();
@@ -250,7 +254,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         };
 
         console.log(`[E2EE-Handshake] Session initialized. Status: ${newSession.status}`);
-        await saveSession(targetUserId, newSession);
+        await saveSession(targetUserId, newSession, masterKey);
+
+        // Vault Sync Trigger
+        const { debouncedUploadVault } = await import('../utils/vaultSyncService');
+        debouncedUploadVault(masterKey);
         
         const myId = currentUser?.id || 'LOCAL';
         const peerId = targetUserId || 'REMOTE';
@@ -305,7 +313,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         await initPromiseRef.current;
       }
 
-      let session = await loadSession(chatUser.id);
+      let session = await loadSession(chatUser.id, masterKey);
       const remoteId = chatUser.id || '';
       const localId = currentUser.id || '';
       const isRemoteHigher = remoteId.localeCompare(localId) > 0;
@@ -332,9 +340,9 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       if (shouldAdoptHandshake) {
         console.log(`[E2EE-Orphan] Tie-breaker: ${isRemoteHigher ? 'Remote higher' : 'Initializing'} responder session...`);
         const username = currentUser.username;
-        const bobSPK_priv = await getKey(`spk_priv_${username}`);
-        const bobIKdh_priv = await getKey(`ik_dh_priv_${username}`);
-        const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${username}_${msg.usedOpk}`) : null;
+        const bobSPK_priv = await getKey(`spk_priv_${currentUser.id}`, masterKey);
+        const bobIKdh_priv = await getKey(`ik_dh_priv_${currentUser.id}`, masterKey);
+        const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${currentUser.id}_${msg.usedOpk}`, masterKey) : null;
         if (!bobSPK_priv || !bobIKdh_priv) {
              console.error("[E2EE-Orphan] Critical identity keys missing. Cannot adopt.");
              return null;
@@ -357,8 +365,12 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           pendingSenderEk: null, status: 'ESTABLISHED'
         };
         console.log('[E2EE-Orphan] Orphan Handshake Adoped. Session Re-aligned.');
-        await saveSession(chatUser.id, session);
+        await saveSession(chatUser.id, session, masterKey);
         sendEncryptedPayload(null, null, 'handshake_ack');
+
+        // Vault Sync Trigger
+        const { debouncedUploadVault } = await import('../utils/vaultSyncService');
+        debouncedUploadVault(masterKey);
         
         // Drain buffered messages after adoption
         setTimeout(() => drainMessageQueue(), 50);
@@ -369,8 +381,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
            session.status = 'ESTABLISHED';
            if ((session.nextRecvIndex || 0) === 0) session.nextRecvIndex = 0;
            if ((session.nextSendIndex || 0) === 0) session.nextSendIndex = 0;
-           await saveSession(chatUser.id, session);
+           await saveSession(chatUser.id, session, masterKey);
            console.log('[E2EE-Orphan] State saved as ESTABLISHED. Triggering queue drain.');
+           
+           const { debouncedUploadVault } = await import('../utils/vaultSyncService');
+           debouncedUploadVault(masterKey);
            drainOutgoingQueue();
         } else if (msg.type === 'handshake_ack') {
            console.log(`[E2EE-Orphan] Manual ACK received. Draining remaining outgoing messages.`);
@@ -431,13 +446,22 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       if (!messageKey) {
         const k = `${tempSession.recvRatchetPublicKey}_${targetIndex}`;
         console.log(`[E2EE-Ratchet] Attempting recovery from skippedMessageKeys: ${k}`);
-        messageKey = tempSession.skippedMessageKeys[k];
-        if (messageKey) {
+        
+        const recoveredKey = tempSession.skippedMessageKeys[k];
+        if (recoveredKey) {
           console.log(`[E2EE-Ratchet] Recovery SUCCESS for key: ${k}`);
+          messageKey = recoveredKey;
+          // [Forward Secrecy Hardening] Explicitly delete the ephemeral key once recovered for decryption
           delete tempSession.skippedMessageKeys[k];
         } else {
+          // [Duplicate Check] If targetIndex < nextRecvIndex and no key, it's likely a duplicate
+          if (targetIndex < session.nextRecvIndex) {
+            console.warn(`[E2EE-Ratchet] Duplicate message detected at index ${targetIndex}. Already processed.`);
+            return null; // Skip duplicate processing
+          }
+          
           // [Harden] If it's a handshake carrier at index 0 and recovery fails, it likely means 
-          // we've already bridged it. Don't crash; return null so history loader can skip it.
+          // we've already bridged it. Don't crash; return null.
           if (targetIndex === 0 && (msg.senderEk || msg.type === 'handshake_ack')) {
              console.warn('[E2EE-Ratchet] Index 0 key already burnt or bridged. Skipping historical handshake.');
              return null;
@@ -447,14 +471,14 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       }
 
       if (msg.type === 'handshake_ack') {
-        await saveSession(chatUser.id, tempSession);
+        await saveSession(chatUser.id, tempSession, masterKey);
         return null;
       }
       
       // CRITICAL FIX: To prevent Key Desync, we MUST save the session (incremented nextRecvIndex) 
       // even if the message itself has no text content (silent handshake/sync).
       if (!msg.encryptedContent) {
-        await saveSession(chatUser.id, tempSession);
+        await saveSession(chatUser.id, tempSession, masterKey);
         return null; 
       }
 
@@ -463,7 +487,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         const decrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, messageKey, ad);
         
         // SUCCESS: Persist the advanced ratchet state
-        await saveSession(chatUser.id, tempSession);
+        await saveSession(chatUser.id, tempSession, masterKey);
         return decrypted;
       } catch (err) {
         // [Stabilize] Only trigger Late Adoption if Standard Decryption failed 
@@ -475,9 +499,9 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
              console.warn('[E2EE] Standard decryption failed, attempting Late Adoption sync...', err.message);
              console.log(`[E2EE-LateAdoption] Forced Adoption triggered at index: ${msg.n || 0}`);
              const username = currentUser.username;
-             const bobSPK_priv = await getKey(`spk_priv_${username}`);
-             const bobIKdh_priv = await getKey(`ik_dh_priv_${username}`);
-             const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${username}_${msg.usedOpk}`) : null;
+             const bobSPK_priv = await getKey(`spk_priv_${currentUser.id}`, masterKey);
+             const bobIKdh_priv = await getKey(`ik_dh_priv_${currentUser.id}`, masterKey);
+             const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${currentUser.id}_${msg.usedOpk}`, masterKey) : null;
              
              if (bobSPK_priv && bobIKdh_priv) {
                // [Defensive Audit] Safe extraction for Late Adoption path.
@@ -516,7 +540,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
                  const finalDecrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, catchupKey, sessionAD);
                  lateSession.recvChainKey = catchupChain;
                  lateSession.nextRecvIndex = targetN + 1;
-                 await saveSession(chatUser.id, lateSession);
+                 await saveSession(chatUser.id, lateSession, masterKey);
                  console.log(`[E2EE-LateAdoption] SUCCESS: Caught up to index ${targetN + 1}`);
                  return finalDecrypted;
                } catch (e2) {
@@ -551,13 +575,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       const decrypted = [];
       for (const msg of batch) {
         // Source of Truth: Check if we have the plaintext cached locally (Forward Secrecy compliant history)
-        let content = await getDecryptedMessage(msg.id);
+        let content = await getDecryptedMessage(msg.id, masterKey);
         
         if (content === null || content === undefined) {
           // Standard decryption flow
           content = await decryptRatchet(msg);
           if (content !== null && typeof content === 'string' && content.trim() !== '') {
-            await saveDecryptedMessage(msg.id, content);
+            await saveDecryptedMessage(msg.id, content, masterKey);
           }
         }
 
@@ -567,7 +591,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           decrypted.push({
             ...msg,
             decryptedContent: content,
-            status: 'received',
+            status: msg.senderId === currentUser.id ? 'sent' : 'received',
           });
         }
       }
@@ -631,9 +655,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   }, [socket, chatUser, currentUser.id, onMsg]);
 
   const sendEncryptedPayload = async (text, localId, type = 'text', isRetry = false) => {
-    try {
+    // [Reliability] Mutex to serialize session mutations (FIFO)
+    sequentialProcessRef.current = sequentialProcessRef.current.then(async () => {
+      try {
       // 1. Initial State
-      let session = await loadSession(chatUser.id);
+      let session = await loadSession(chatUser.id, masterKey);
       
       // -- Buffering Logic --
       console.log(`[TX-Step] Attempting n=${session?.nextSendIndex || 0} isRetry=${isRetry} status=${session?.status || 'NONE'}`);
@@ -732,7 +758,13 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           createdAt: new Date().toISOString()
         };
         setMessages((p) => [...p, optimisticMsg]);
-        await saveDecryptedMessage(localId, text);
+        // [Persistence Fix] Save outgoing message with full metadata to ensure it's bundled in the vault
+        await saveDecryptedMessage(localId, {
+          text,
+          senderId: currentUser.id,
+          recipientId: chatUser.id,
+          timestamp: Date.now()
+        }, masterKey);
       }
 
       console.log(`[E2EE] Encrypting message with sender index: ${currentIndex}`);
@@ -768,11 +800,16 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         localId: localId,
       });
 
-      await saveSession(chatUser.id, session);
-    } catch (err) {
-      console.error('[E2EE-Send] Failed to send payload:', err);
-      alert('Cannot send: ' + err.message);
-    }
+      await saveSession(chatUser.id, session, masterKey);
+
+      // Vault Sync Trigger
+      const { debouncedUploadVault } = await import('../utils/vaultSyncService');
+      debouncedUploadVault(masterKey);
+      } catch (err) {
+        console.error('[E2EE-Send] Failed to send payload:', err);
+        alert('Cannot send: ' + err.message);
+      }
+    }); // End sequentialProcessRef
   };
 
   const handleSendMessage = async (e, forcedText = null) => {

@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const Message = require('../models/Message');
+const { User, Message, Block } = require('../models');
 const { Op } = require('sequelize');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -57,6 +56,16 @@ module.exports = (io) => {
         const isAck = type === 'handshake_ack';
         if (!recipientId || (!encryptedContent && !isHandshake && !isAck)) {
            return socket.emit('error', { message: 'Invalid message data (Empty payload rejected)' });
+        }
+
+        // [Security] Block List Enforcement
+        const isBlocked = await Block.findOne({
+          where: { blockerId: recipientId, blockedId: socket.userId }
+        });
+        if (isBlocked) {
+          console.warn(`[BLOCK] Silencing message from ${socket.userId} to ${recipientId} (Blocked)`);
+          // We return success to the sender to avoid letting them know they are blocked (Stealth Block)
+          return socket.emit('newMessage', { ...data, senderId: socket.userId, createdAt: new Date() });
         }
 
         const message = await Message.create({
