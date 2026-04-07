@@ -1,74 +1,131 @@
-# Secure Chat App - End-to-End Encryption (E2EE) Upgrade Architecture
+🔬 GIẢI THÍCH CHI TIẾT CÔNG NGHỆ VÀ KIẾN TRÚC BẢO MẬT
+Dự án này không đơn thuần là một ứng dụng chat qua WebSockets. Đây là một hệ thống được thiết kế theo nguyên tắc Zero-Knowledge Architecture (Kiến trúc Không lưu vết). Máy chủ (Server) chỉ đóng vai trò là "người đưa thư bị mù", nhiệm vụ duy nhất là chuyển phát các gói dữ liệu mà nó không tài nào đọc được.
 
-Chào mừng bạn đến với tài liệu tổng hợp về cấu trúc bảo mật mới nhất của dự án **Secure Chat App**. Hệ thống này vừa trải qua một đợt nâng cấp kỹ thuật toàn diện nhằm chống lại các rủi ro bảo mật khét tiếng nhất, đồng thời thay máu hàng loạt công nghệ lõi để đạt chuẩn Enterprise-level Security.
+Để làm được điều này, hệ thống áp dụng Kiến trúc Bảo mật 2 Lớp (Two-Layer Security Architecture):
 
----
+🛡️ LỚP 1: BẢO VỆ ĐƯỜNG TRUYỀN (E2EE - Mã hoá Tin nhắn & Chìa khoá)
+Mục tiêu của lớp này là đảm bảo: Chỉ người gửi và người nhận mới có thể đọc được tin nhắn khi chúng đang bay trên mạng Internet.
 
-## 🚀 III. Cải tiến Hệ thống Toàn diện: Phiên bản v19.3 (Systemic Sweep)
+1. Giao thức X3DH (Extended Triple Diffie-Hellman)
+Định nghĩa: Là một giao thức thỏa thuận khóa (Key Agreement). Nó cho phép hai người xa lạ (Alice và Bob) thống nhất chung một "Chìa khóa bí mật" một cách an toàn, ngay cả khi Bob đang Offline và không thể phản hồi ngay lập tức.
 
-Bản cập nhật này tập trung vào tính **Bền bỉ (Reliability)**, **Khả năng phục hồi (Recovery)** và **Bảo mật Đa lớp (Defense-in-Depth)**:
+Cách hoạt động & Nơi áp dụng:
 
-### 1. Khóa Bất đồng bộ (Async Mutex - FIFO Queue)
-*   **Vấn đề:** Các thao tác ghi đè Session (Ratchet state) xảy ra đồng thời khi nhận/gửi tin nhắn dồn dập, dẫn đến hỏng "bánh răng" mã hóa.
-*   **Giải pháp:** Triển khai cơ chế **Sequential Processing Queue** trong `ChatWindow.jsx`. Mọi hành động thay đổi trạng thái mật mã (Encrypt/Decrypt/Rotate) đều phải xếp hàng đợi, đảm bảo tính nguyên tử (Atomicity).
+Khi Alice tạo tài khoản, cô ấy tạo ra một bộ khóa công khai (PreKeys) và gửi lên Server cất giữ.
 
-### 2. Thu hồi Token Tức thì (Global Revocation)
-*   **Công nghệ:** **Token Versioning**.
-*   **Giải pháp:** Middleware `auth.js` kiểm tra `tokenVersion` trong DB trên mỗi yêu cầu. Khi người dùng đổi mật khẩu hoặc thực hiện "Global Logout", version này tăng lên, lập tức vô hiệu hóa mọi Access Token cũ đang lưu hành.
+Khi Bob muốn chat với Alice lần đầu, Bob lên Server "xin" bộ PreKeys của Alice.
 
-### 3. Hệ thống Chặn "Tàng hình" (Stealth Blocking)
-*   **Vấn đề:** Chặn ở Client chỉ là che mắt UI; hacker có thể dùng script tấn công trực tiếp.
-*   **Giải pháp:** Thực thi chặn tại **Backend (Socket & Controller)**. Tin nhắn từ người bị chặn sẽ bị server âm thầm loại bỏ mà không báo lỗi cho kẻ gửi, tránh để lộ dấu vết trạng thái chặn.
+Bob dùng hàm toán học kết hợp khóa của Alice và khóa của Bob để tính ra một chuỗi Bí mật chung (Shared Secret). Hệ thống dùng chuẩn ECDH (Đường cong Elliptic X25519) để thực hiện phép toán này.
 
-### 4. Chống Tấn công Từ chối Dịch vụ (DoS Protection)
-*   **Giới hạn Payload:** Cấu hình `express.json({ limit: '1mb' })` để ngăn chặn việc tải lên các khối dữ liệu khổng lồ phá hoại bộ nhớ server (đặc biệt là Vault Data).
-*   **Validation Startup:** Hệ thống từ chối khởi động nếu thiếu bất kỳ biến môi trường mật mã nào (`JWT_SECRET`, `JWT_REFRESH_SECRET`, v.v.).
+Kết quả: Alice và Bob có chung một chìa khóa mà Server đứng giữa không thể biết được.
 
----
+2. Thuật toán Double Ratchet (Bánh răng Kép)
+Định nghĩa: Nếu X3DH giúp tạo ra chìa khóa đầu tiên, thì Double Ratchet giúp tạo ra các chìa khóa tiếp theo. Thuật toán này hoạt động như một chiếc bánh răng: chỉ có thể quay tiến lên chứ không thể quay lùi.
 
-## 🛡️ I. Các Lỗ hổng Bảo mật Đã Được Khắc Phục (Defense-in-Depth)
+Cách hoạt động & Nơi áp dụng:
 
-### 1. Rò rỉ Dữ liệu trên Máy chủ (Zero-Knowledge Storage)
-*   **Giải pháp:** Toàn bộ nội dung chat và khóa phiên được mã hóa **AES-256-GCM** trước khi rời khỏi trình duyệt. Máy chủ là "Zero-Knowledge", không thể đọc được nội dung dù có quyền truy cập Database.
+Thay vì dùng 1 chìa khóa để mã hóa tất cả tin nhắn, Double Ratchet sẽ sinh ra một chìa khóa mới (Message Key) cho MỖI MỘT tin nhắn.
 
-### 2. Nguy cơ trộm Khóa từ lỗ hổng XSS (Non-Extractable Keys)
-*   **Giải pháp:** Identity Keys được lưu vào **IndexedDB** dưới dạng `extractable: false`. Kịch bản XSS lén lút chạy script không thể trích xuất khóa thô ra khỏi bộ nhớ bảo mật của trình duyệt.
+Gửi tin nhắn 1 -> Dùng khóa 1. Gửi tin nhắn 2 -> Dùng khóa 2.
 
-### 3. Forward Secrecy & Key Burning
-*   **Giới hạn Khóa Skipped:** Chỉ lưu tối đa 100 khóa tin nhắn bị nhỡ để tránh tràn bộ nhớ và giới hạn rủi ro nếu một khóa cũ bị lộ.
-*   **Key Burning:** Khóa tin nhắn được xóa sạch khỏi RAM ngay sau khi giải mã thành công (Ephemeral Message Keys).
+Khi gửi/nhận xong, chìa khóa lập tức bị xóa bỏ khỏi RAM (đốt khóa).
 
----
+Bảo mật mang lại: * Forward Secrecy (Bảo mật hướng về trước): Nếu hôm nay hacker lấy trộm được laptop của bạn và moi được chìa khóa hiện tại, chúng cũng KHÔNG THỂ giải mã được các tin nhắn bạn đã nhắn ngày hôm qua (vì khóa cũ đã bị đốt).
 
-## ⚡ II. Danh mục Công nghệ Bảo mật (Security Tech Stack)
+Break-in Recovery (Phục hồi sau xâm nhập): Cứ mỗi lần bạn nhận được tin nhắn phản hồi từ đối phương, "bánh răng" sẽ xoay và thiết lập một chuỗi khóa hoàn toàn mới, đá văng hacker ra ngoài.
 
-### 🔐 Mật mã học (Cryptography)
-*   **X3DH (Extended Triple Diffie-Hellman)**: Thỏa thuận khóa ban đầu an toàn tuyệt đối.
-*   **Double Ratchet Protocol**: Tự động xoay khóa sau mỗi tin nhắn gửi/nhận, đảm bảo lộ một khóa không làm lộ toàn bộ lịch sử.
-*   **PBKDF2 (SHA-256)**: Phái sinh **Master Key** từ mã PIN người dùng với 100,000 vòng lặp.
-*   **JWK (JSON Web Key)**: Chuẩn hóa việc đóng gói và lưu trữ `CryptoKey` lên Cloud Vault mà không mất metadata.
+3. Các thuật toán Mật mã lõi (Sử dụng Web Crypto API)
+Toàn bộ Lớp 1 được xử lý trực tiếp tại trình duyệt (Client-side) thông qua Web Crypto API (tích hợp sẵn trong JS, không dùng thư viện ngoài để đảm bảo không có backdoor):
 
-### 🌐 Mạng & Giao thức (Network & Protocols)
-*   **JWT Access (15m) & Refresh Token (7d)**: Cơ chế xoay vòng phiên đăng nhập an toàn.
-*   **HTTPOnly Cookies**: Chống trộm Refresh Token qua các cuộc tấn công script.
-*   **Helmet & CORS**: Bảo vệ Header và kiểm soát nguồn gốc truy cập nghiêm ngặt.
-*   **BCRYPT (10 rounds)**: Băm mật khẩu người dùng với muối (salt) ngẫu nhiên.
+HKDF (Nhà máy đúc khóa): Từ 1 bí mật chung của X3DH, HKDF giúp "đúc" ra hàng loạt các khóa con để dùng cho Bánh răng Kép.
 
----
+AES-256-GCM: Thuật toán mã hóa đối xứng. Đây là hàm trực tiếp biến dòng chữ "Xin chào" thành chuỗi ký tự rác. Chế độ GCM giúp kiểm tra tính toàn vẹn, nếu Server cố tình sửa đổi 1 dấu chấm trong tin nhắn, hàm giải mã sẽ báo lỗi và từ chối.
 
-## 🔐 IV. Tuyến Mã hóa Mật mã Cốt lõi (Cryptography Pipeline)
+ECDSA (P-256): Chữ ký số. Giúp hệ thống chống lại việc Server giả mạo khóa của người dùng (Man-in-the-Middle Attack).
 
-1.  **ECDSA (P-256)**: Identity Key phục vụ ký số xác thực thực thể.
-2.  **X25519 (ECDH)**: Trao đổi bí mật Diffie-Hellman trên đường cong Elliptic.
-3.  **HKDF (SHA-256)**: Hàm phái sinh khóa để tinh chế Secret thành khóa đối xứng AES.
-4.  **AES-256-GCM**: Mã hóa dữ liệu khối kèm AD (Associated Data) để bảo vệ toàn vẹn (Integrity).
+🗄️ LỚP 2: BẢO VỆ LƯU TRỮ (Data-at-Rest & "Két sắt" Đám mây)
+Mục tiêu của lớp này là: Bảo vệ dữ liệu cục bộ trên máy tính không bị đánh cắp, đồng thời cho phép người dùng đăng nhập trên máy tính mới mà vẫn khôi phục được toàn bộ lịch sử tin nhắn (Giống Zalo/Telegram Cloud Backup).
 
----
-*Tài liệu này được cập nhật vào ngày 07/04/2026 bởi hệ thống Antigravity - Systemic Sweep & Security Audit Phase.*
- lệ phá mã vô hiệu.
-    *   **Điểm yếu:** Bản thân HKDF cũng chỉ là một "nhà máy máy tiện rèn chìa khóa", sức mạnh của nó dừng lại ở việc cấp chìa, chứ nó hoàn toàn không có túi lưu trữ nội dung và không trực tiếp đóng gói thay thế (Mã hóa) ổ khóa vào file văn bản được.
-    *   **Công nghệ khắc phục:** **AES-GCM**.
-*   **AES-GCM (Advanced Encryption Standard - Tiêu chuẩn GCM)**
-    *   **Dùng ở đâu:** Điểm kết cuối đường ống, thao tác trực tiếp ngàm mã hóa Khối văn bản tin nhắn.
-    *   **Điểm mạnh:** Mã hóa khóa đối xứng với tốc độ ánh sáng. Chế độ GCM (Galois/Counter Mode) cung cấp cùng lúc hai phép thuật vĩ đại: Mã hóa giấu nội dung (Confidentiality) VÀ Kẹp thêm Thẻ bảo toàn nguyên trạng (Authentication Tag - GMAC). Xóa bỏ hoàn toàn điểm yếu của thế hệ mã hóa cũ (như chuẩn AES-CBC kém cỏi dễ bị Padding Oracle Attack nắn đổi nội dung). Hễ hacker trên mạng tự ý chặn gói tin và sửa đổi mù dù chỉ 1 bit của tin nhắn, phép đo GMAC lập tức lệch trục, ngòi nổ kích hoạt và trình duyệt sẽ thẳng thừng ném bỏ file rác đó mà từ chối lệnh giải mã.
-    *   *(Chuỗi mã hóa mật mã đóng tệp - Tuyến End-to-End Encryption tuyệt đối an toàn)*
+1. Passphrase & Trình Phái sinh Khóa (PBKDF2)
+Vấn đề: Trình duyệt lưu lịch sử chat ở IndexedDB. Nếu bị trộm máy tính, kẻ gian chỉ cần mở F12 (DevTools) là đọc được hết.
+
+Cách giải quyết: * Khi đăng ký, người dùng tạo một Mật khẩu khôi phục (Passphrase) (Tối thiểu 8 ký tự).
+
+Ứng dụng dùng thuật toán PBKDF2-HMAC-SHA256 trộn Passphrase này với một chuỗi ngẫu nhiên (Salt) và lặp lại phép toán 100.000 lần (Vòng lặp này giúp chống lại sự tấn công dò mật khẩu - Brute-force của siêu máy tính).
+
+Kết quả tạo ra một Master Key (Khóa chủ). Khóa chủ này chỉ sống trên RAM và chết đi khi F5 hoặc đóng Tab.
+
+2. Két sắt Toàn năng (Omnipotent Vault) và Đồng bộ Đa thiết bị
+Đây là kỹ thuật đỉnh cao để giúp dữ liệu vừa đồng bộ lên Đám mây, vừa ẩn danh tuyệt đối:
+
+Giai đoạn Đóng Két (Lưu trữ): * Bất cứ khi nào bạn có tin nhắn mới, hệ thống sẽ gom toàn bộ Lịch sử chat (decrypted_messages) và Tọa độ chìa khóa (ratchetStore) lại thành một khối.
+
+Dùng Master Key khóa chặt khối này lại (bằng AES-GCM), biến nó thành một "Cục Két sắt" (Vault Blob) không thể đọc được.
+
+Đẩy Cục Két sắt này lên lưu trữ tại Database của Backend. (Lúc này Backend có giữ lịch sử chat của bạn, nhưng nó vĩnh viễn không thể đọc được vì Backend không có Master Key).
+
+Giai đoạn Mở Két (Khôi phục trên máy mới):
+
+Bạn sang máy tính mới đăng nhập. Backend trả về cho bạn Cục Két sắt vô nghĩa.
+
+Ứng dụng bật hộp thoại: "Vui lòng nhập Mật khẩu khôi phục".
+
+Bạn nhập đúng Mật khẩu -> Thuật toán rèn lại Master Key trên RAM -> Dùng Master Key mở khóa Cục Két sắt -> Toàn bộ tin nhắn và chìa khóa cũ hiện ra y như cũ.
+
+🌐 HẠ TẦNG VÀ CÔNG NGHỆ BỔ TRỢ (Infrastructure)
+Để 2 lớp bảo mật trên hoạt động trơn tru, dự án sử dụng các công nghệ tiêu chuẩn công nghiệp:
+
+Frontend: ReactJS, Vite & Tailwind CSS
+
+Quản lý State phức tạp (ví dụ: các Khóa đang nằm trên RAM) thông qua React Context (AuthContext).
+
+Sử dụng IndexedDB làm kho lưu trữ cục bộ cho các tin nhắn đã giải mã (đã được bọc lại bằng Master Key).
+
+Cơ chế Async Mutex Queue (Hàng đợi bất đồng bộ): Đảm bảo khi nhận 10 tin nhắn cùng lúc, các bánh răng mật mã sẽ xoay tuần tự (FIFO) mà không bị kẹt hay gãy khóa.
+
+Giao tiếp Thời gian thực: Socket.IO
+
+Hoạt động như một đường ống tốc độ cao. Dữ liệu chạy qua Socket.IO không phải là chữ rõ, mà là những khối dữ liệu đã bị mã hóa AES từ Lớp 1 (Ciphertext Payloads).
+
+Backend: Node.js, Express & PostgreSQL (Sequelize ORM)
+
+Node.js/Express: Xử lý xác thực đăng nhập (JWT). JWT được thiết kế có tokenVersion trong Database để thu hồi quyền truy cập (Global Logout) ngay lập tức khi phát hiện nghi ngờ.
+
+PostgreSQL: Lưu trữ tài khoản, các khóa công khai PreKeys, và đặc biệt là lưu trữ Cục Két sắt Đám mây (VaultData) với cấu trúc dữ liệu khổng lồ (được cấu hình chống tấn công DoS với limit hợp lý).
+
+Stealth Blocking (Chặn tàng hình): Logic Backend kiểm tra trực tiếp quan hệ Block trong Database trước khi đẩy gói tin Socket. Kẻ bị chặn không hề hay biết gói tin của mình đã bị ném vào sọt rác, giúp bảo vệ quyền riêng tư tuyệt đối.
+
+⚙️ HƯỚNG DẪN CÀI ĐẶT VÀ CHẠY DỰ ÁN
+Yêu cầu hệ thống:
+Node.js (v18+ khuyến nghị)
+
+PostgreSQL (Đang chạy và có một Database trống)
+
+1. Cài đặt Backend
+Bash
+cd server
+npm install
+Tạo file .env trong thư mục server:
+
+Đoạn mã
+PORT=5000
+DATABASE_URL=postgres://username:password@localhost:5432/secure_chat_db
+JWT_SECRET=your_super_secret_jwt_key
+JWT_REFRESH_SECRET=your_super_secret_refresh_key
+ALLOWED_ORIGINS=http://localhost:5173
+NODE_ENV=development
+Chạy Server:
+
+Bash
+npm run dev
+2. Cài đặt Frontend
+Bash
+cd client
+npm install
+Chạy Client:
+
+Bash
+npm run dev
+Truy cập ứng dụng tại: http://localhost:5173
+
+Dự án nghiên cứu: Xây dựng ứng dụng chat an toàn với X3DH và Double Ratchet.
