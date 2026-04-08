@@ -59,7 +59,7 @@ const Register = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordTouched, setPasswordTouched] = useState(false);
-  const [pin, setPin] = useState('');
+  const [passphrase, setPassphrase] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const { login } = useAuth();
@@ -84,8 +84,8 @@ const Register = () => {
       return;
     }
 
-    if (pin.length < 6) {
-      setError('Mã PIN phải có ít nhất 6 ký tự để đảm bảo an toàn');
+    if (passphrase.length < 8) {
+      setError('Mật khẩu khôi phục phải có ít nhất 8 ký tự để đảm bảo an toàn E2EE.');
       return;
     }
 
@@ -119,8 +119,13 @@ const Register = () => {
         opksPrivate.push(key);
       }
 
-      // 2. Wrap Identity Keys
-      const { wrappedKeyB64, saltB64, ivB64 } = await wrapIdentityBundleWithPIN(ikSign.privateKey, ikDh.privateKey, pin);
+      // 2. Wrap Identity Keys (Include SPK for full recovery)
+      const { wrappedKeyB64, saltB64, ivB64 } = await wrapIdentityBundleWithPIN(
+        ikSign.privateKey, 
+        ikDh.privateKey, 
+        spk.privateKey,
+        passphrase
+      );
 
       // 3. Register on Server
       const res = await authApi.register({
@@ -140,14 +145,19 @@ const Register = () => {
 
       const userId = res.data.user.id;
 
-      // 4. Save to IndexedDB (Only after server success)
-      const lowerUsername = username.toLowerCase();
-      await setKey(`ik_sign_priv_${lowerUsername}`, ikSign.privateKey);
-      await setKey(`ik_dh_priv_${lowerUsername}`, ikDh.privateKey);
-      await setKey(`spk_priv_${lowerUsername}`, spk.privateKey);
+      // 4. Derive the high-level Master Key (AES-GCM) that lives in RAM
+      const salt = base64ToArrayBuffer(saltB64);
+      const { pbkdf2Derive } = await import('../utils/crypto');
+      const mKey = await pbkdf2Derive(passphrase, new Uint8Array(salt));
+      console.log('[Registration] Master Key derived for local encryption.');
+
+      // 5. Save to IndexedDB (Only after server success) - ENCRYPTED with Master Key
+      await setKey(`ik_sign_priv_${userId}`, ikSign.privateKey, mKey);
+      await setKey(`ik_dh_priv_${userId}`, ikDh.privateKey, mKey);
+      await setKey(`spk_priv_${userId}`, spk.privateKey, mKey);
 
       for (let i = 0; i < opksPrivate.length; i++) {
-        await setKey(`opk_priv_${lowerUsername}_${opks[i].publicKey}`, opksPrivate[i].privateKey);
+        await setKey(`opk_priv_${userId}_${opks[i].publicKey}`, opksPrivate[i].privateKey, mKey);
       }
 
       // Mark this device as having an initialized identity
@@ -283,26 +293,27 @@ const Register = () => {
             )}
           </div>
 
-          {/* PIN */}
+          {/* Passphrase */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2 transition-colors">
-              Mã PIN khôi phục tin nhắn (Tối thiểu 6 chữ số)
+              Mật khẩu khôi phục tin nhắn (Recovery Passphrase)
             </label>
             <input
-              id="register-pin"
+              id="register-passphrase"
               type="password"
               required
-              className="w-full px-4 py-3 bg-white dark:bg-slate-900/50 border border-gray-300 dark:border-slate-700/50 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-gray-900 dark:text-slate-200 tracking-[0.5em] font-mono placeholder-gray-400 dark:placeholder-gray-500"
-              placeholder="••••••"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              pattern="\d*"
-              maxLength={12}
+              className="w-full px-4 py-3 bg-white dark:bg-slate-900/50 border border-gray-300 dark:border-slate-700/50 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-gray-500"
+              placeholder="Nhập ít nhất 8 ký tự..."
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              maxLength={64}
             />
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 transition-colors">
-              Mã PIN này dùng để khôi phục lịch sử chat khi bạn đổi điện thoại/trình duyệt. Máy
-              chủ không thể biết mã này.
-            </p>
+            <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+              <p className="text-[11px] leading-relaxed text-yellow-600 dark:text-yellow-400 font-medium">
+                ⚠️ <span className="underline">Lưu ý cực kỳ quan trọng</span>: Mật khẩu này dùng để mã hóa thiết bị của bạn. 
+                Hệ thống KHÔNG lưu mật khẩu này. Nếu quên, bạn sẽ <span className="uppercase">mất hoàn toàn</span> lịch sử tin nhắn khi đổi thiết bị.
+              </p>
+            </div>
           </div>
 
           <button

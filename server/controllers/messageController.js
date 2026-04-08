@@ -1,11 +1,26 @@
 const { Op } = require('sequelize');
-const Message = require('../models/Message');
+const { Message, Block } = require('../models');
 
 exports.getMessages = async (req, res) => {
   try {
     const { userId } = req.params;
     const currentUserId = req.userId;
     const { cursor } = req.query;
+
+    // [Security] Block check
+    const isBlocked = await Block.findOne({
+      where: {
+        [Op.or]: [
+          { blockerId: currentUserId, blockedId: userId },
+          { blockerId: userId, blockedId: currentUserId }
+        ]
+      }
+    });
+
+    if (isBlocked) {
+      return res.status(403).json({ error: 'Truy cập bị từ chối (Blocking active)' });
+    }
+
     const limit = 50;
     const whereClause = {
       [Op.or]: [

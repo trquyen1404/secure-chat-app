@@ -1,7 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User');
-const Group = require('./Group');
 
 const GroupMember = sequelize.define('GroupMember', {
   id: {
@@ -12,18 +10,10 @@ const GroupMember = sequelize.define('GroupMember', {
   groupId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: {
-      model: 'Groups',
-      key: 'id',
-    },
   },
   userId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: {
-      model: 'Users',
-      key: 'id',
-    },
   },
   role: {
     type: DataTypes.STRING,
@@ -38,5 +28,10 @@ const GroupMember = sequelize.define('GroupMember', {
     }
   ]
 });
+
+GroupMember.associate = (models) => {
+  GroupMember.belongsTo(models.User, { foreignKey: 'userId', as: 'User' });
+  GroupMember.belongsTo(models.Group, { foreignKey: 'groupId', as: 'Group' });
+};
 
 module.exports = GroupMember;

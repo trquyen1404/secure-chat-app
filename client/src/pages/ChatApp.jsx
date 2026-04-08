@@ -109,22 +109,11 @@ const ChatApp = () => {
       />
       
       {selectedUser ? (
-        <div className="flex-1 relative flex">
-          {chatUnlockedFor === selectedUser.id ? (
-            <ChatWindow 
-              user={selectedUser} 
-              onClose={() => { setSelectedUser(null); setChatUnlockedFor(null); }}
-            />
-          ) : (
-            <PinLock 
-              userId={user.id} 
-              mode="verifyChat" 
-              chatTarget={selectedUser} 
-              onSuccess={handleChatUnlockSuccess} 
-              onCancel={handleCancelChatLock}
-            />
-          )}
-        </div>
+        <ChatWindow 
+          key={selectedUser.id}
+          user={selectedUser} 
+          onClose={() => setSelectedUser(null)}
+        />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800/50 transition-colors duration-500">
           <div className="w-24 h-24 mb-6 rounded-full bg-slate-200 dark:bg-slate-800/50 flex items-center justify-center shadow-inner transition-colors">

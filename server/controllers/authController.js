@@ -1,5 +1,4 @@
-const User = require('../models/User');
-const PreKey = require('../models/PreKey');
+const { User, PreKey } = require('../models');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -88,7 +87,11 @@ exports.register = async (req, res) => {
       return newUser;
     });
 
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const token = jwt.sign(
+      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      JWT_SECRET, 
+      { expiresIn: JWT_EXPIRES }
+    );
     const refreshToken = jwt.sign(
       { userId: user.id, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 
@@ -132,7 +135,11 @@ exports.login = async (req, res) => {
       return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
     }
 
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const token = jwt.sign(
+      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      JWT_SECRET, 
+      { expiresIn: JWT_EXPIRES }
+    );
     const refreshToken = jwt.sign(
       { userId: user.id, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 
@@ -171,7 +178,11 @@ exports.refresh = async (req, res) => {
       return res.status(401).json({ error: 'Refresh Token không hợp lệ hoặc đã bị thu hồi' });
     }
 
-    const newAccessToken = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const newAccessToken = jwt.sign(
+      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      JWT_SECRET, 
+      { expiresIn: JWT_EXPIRES }
+    );
     const newRefreshToken = jwt.sign(
       { userId: user.id, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 

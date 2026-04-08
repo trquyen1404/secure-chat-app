@@ -5,9 +5,18 @@
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-export function getAssociatedData(id1, id2) {
-  const ids = [id1, (id2 || '')].sort();
-  return ids.join('-');
+// Helper for deterministic Associated Data (AD) strings based on participant IDs
+export function getAssociatedData(id01, id02) {
+  // Ensure we have strings and sort them to guarantee order-independence
+  const id1 = String(id01 || '');
+  const id2 = String(id02 || '');
+  const ids = [id1, id2].sort();
+  const ad = ids.join(':'); // Use colon as a distinct separator to avoid UUID hyphen confusion
+  
+  if (id1 !== id2) {
+    console.log(`[E2EE-AD] Generating AD for ${id1.slice(0,8)}... and ${id2.slice(0,8)}... -> "${ad}"`);
+  }
+  return ad;
 }
 
 export async function getFingerprint(buffer) {
@@ -18,15 +27,19 @@ export async function getFingerprint(buffer) {
 export function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  bytes.forEach(b => (binary += String.fromCharCode(b)));
+  // [Fix] Avoid spread operator (...) for large buffers to prevent Stack Overflow
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
   return window.btoa(binary);
 }
 
 export function base64ToArrayBuffer(base64) {
-  if (!base64 || typeof base64 !== 'string') return new ArrayBuffer(0);
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const binaryString = window.atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
   return bytes.buffer;
 }
 
@@ -118,9 +131,13 @@ export async function importX25519Public(b64) {
 // ── HKDF (Key Derivation) ────────────────────────────────────────────────────
 
 export async function hkdfDerive(masterSecret, salt, info, length = 256) {
+  // [Fix] Explicitly wrap inputs in Uint8Array for browser-agnostic deterministic derivation
+  const rawMaster = new Uint8Array(masterSecret);
+  const rawSalt = salt ? new Uint8Array(salt) : new Uint8Array(32);
+  
   const keyMaterial = await window.crypto.subtle.importKey(
     'raw',
-    masterSecret,
+    rawMaster,
     { name: 'HKDF' },
     false,
     ['deriveKey']
@@ -129,7 +146,7 @@ export async function hkdfDerive(masterSecret, salt, info, length = 256) {
   const key = await window.crypto.subtle.deriveKey(
     {
       name: 'HKDF',
-      salt: salt || new Uint8Array(32),
+      salt: rawSalt,
       info: new TextEncoder().encode(info || ''),
       hash: 'SHA-256'
     },
@@ -253,8 +270,8 @@ export async function decryptMessageGCM(ciphertextB64, ivB64, key, associatedDat
     const decrypted = await window.crypto.subtle.decrypt(algorithm, key, data);
     return new TextDecoder().decode(decrypted);
   } catch (err) {
-    console.error(`[CRYPTO] Decryption failed!`, err);
-    throw new Error('E2EE Decryption Failed (Possible AD/MAC Mismatch)');
+    console.error(`[CRYPTO] Decryption failed! (AD: "${associatedData}", IV FP: ${await getFingerprint(base64ToArrayBuffer(ivB64))})`, err);
+    throw new Error('E2EE Decryption Failed (Possible Key Desync or AD Mismatch)');
   }
 }
 
@@ -272,14 +289,60 @@ export async function pbkdf2Derive(pin, salt, iterations = 100000) {
   );
 }
 
-export async function wrapIdentityBundleWithPIN(ikSignPriv, ikDhPriv, pin) {
+/**
+ * Encrypts arbitrary data using a Master Key (AES-GCM).
+ * Returns { ciphertextB64, ivB64 }
+ */
+export async function encryptData(plaintext, masterKey) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(typeof plaintext === 'string' ? plaintext : JSON.stringify(plaintext));
+  
+  const ciphertext = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    masterKey,
+    encoded
+  );
+
+  console.debug(`[CRYPTO] Data encrypted. size=${ciphertext.byteLength}`);
+  return {
+    ciphertextB64: arrayBufferToBase64(ciphertext),
+    ivB64: arrayBufferToBase64(iv)
+  };
+}
+
+/**
+ * Decrypts data using a Master Key (AES-GCM).
+ * Returns unparsed string (user should JSON.parse if needed).
+ */
+export async function decryptData(ciphertextB64, ivB64, masterKey) {
+  try {
+    const iv = base64ToArrayBuffer(ivB64);
+    const data = base64ToArrayBuffer(ciphertextB64);
+
+    const decrypted = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      masterKey,
+      data
+    );
+    
+    const decoded = new TextDecoder().decode(decrypted);
+    console.debug(`[CRYPTO] Data decrypted. length=${decoded.length}`);
+    return decoded;
+  } catch (err) {
+    console.error(`[CRYPTO] Data decryption failed!`, err);
+    throw new Error('Decryption Failed (Incorrect Key or Corrupted Data)');
+  }
+}
+
+export async function wrapIdentityBundleWithPIN(ikSignPriv, ikDhPriv, spkPriv, pin) {
   const salt = window.crypto.getRandomValues(new Uint8Array(16));
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const aesKey = await pbkdf2Derive(pin, salt);
 
   const bundle = {
     sign: arrayBufferToBase64(await window.crypto.subtle.exportKey('pkcs8', ikSignPriv)),
-    dh: arrayBufferToBase64(await window.crypto.subtle.exportKey('pkcs8', ikDhPriv))
+    dh: arrayBufferToBase64(await window.crypto.subtle.exportKey('pkcs8', ikDhPriv)),
+    spk: arrayBufferToBase64(await window.crypto.subtle.exportKey('pkcs8', spkPriv))
   };
 
   const encodedBundle = new TextEncoder().encode(JSON.stringify(bundle));
@@ -302,8 +365,186 @@ export async function unwrapIdentityBundleWithPIN(wrappedKeyB64, saltB64, ivB64,
 
   const bundle = JSON.parse(new TextDecoder().decode(decrypted));
 
-  return {
-    pkcs8Sign: base64ToArrayBuffer(bundle.sign),
-    pkcs8Dh: base64ToArrayBuffer(bundle.dh)
+  return { 
+    pkcs8Sign: base64ToArrayBuffer(bundle.sign), 
+    pkcs8Dh: base64ToArrayBuffer(bundle.dh),
+    pkcs8Spk: base64ToArrayBuffer(bundle.spk)
   };
+}
+
+// ── Shared Helpers ───────────────────────────────────────────────────────────
+
+export async function importX25519Public(b64) {
+  const buffer = base64ToArrayBuffer(b64);
+  return window.crypto.subtle.importKey(
+    'raw',
+    buffer,
+    { name: 'X25519' },
+    true,
+    []
+  );
+}
+// ── Session Serialization (Refactored Non-Destructive Flow) ────────────────
+
+/**
+ * Re-imports a CryptoKey from a JWK object.
+ */
+export async function importKeyFromJWK(jwk, alg, usages) {
+  try {
+    return await window.crypto.subtle.importKey('jwk', jwk, alg, true, usages);
+  } catch (err) {
+    console.error(`[CRYPTO-DESERIALIZE] Failed to import key for ${JSON.stringify(alg)}`, err);
+    throw err;
+  }
+}
+
+/**
+ * Serializes a Double Ratchet session object for JSON storage. 
+ * NON-DESTRUCTIVE: Builds a fresh object for export instead of mutating the RAM session.
+ */
+export async function serializeSession(session) {
+  if (!session) return null;
+
+  // 1. Start with a shallow copy for all primitives (Indices, Status, Flags)
+  const serialized = { ...session };
+  const keyPromises = [];
+
+  // Helper to export and place in serialized object safely
+  const exportAndStore = async (key, targetObj, keyName) => {
+    if (key instanceof CryptoKey) {
+      const jwk = await window.crypto.subtle.exportKey('jwk', key);
+      targetObj[keyName] = { _isJWK: true, jwk };
+    }
+  };
+
+  // Export Root and Chain Keys
+  if (session.rootKey) keyPromises.push(exportAndStore(session.rootKey, serialized, 'rootKey'));
+  if (session.sendChainKey) keyPromises.push(exportAndStore(session.sendChainKey, serialized, 'sendChainKey'));
+  if (session.recvChainKey) keyPromises.push(exportAndStore(session.recvChainKey, serialized, 'recvChainKey'));
+
+  // Export KeyPairs (Identity, Ephemeral, or Sender Ratchet)
+  const exportKeyPair = async (pair, name) => {
+    if (!pair) return;
+    serialized[name] = { ...pair }; // Shallow copy of the pair object (contains metadata/b64)
+    if (pair.publicKey instanceof CryptoKey) {
+      await exportAndStore(pair.publicKey, serialized[name], 'publicKey');
+    }
+    if (pair.privateKey instanceof CryptoKey) {
+      await exportAndStore(pair.privateKey, serialized[name], 'privateKey');
+    }
+  };
+
+  keyPromises.push(exportKeyPair(session.identityKeyPair, 'identityKeyPair'));
+  keyPromises.push(exportKeyPair(session.ephemeralKeyPair, 'ephemeralKeyPair'));
+  keyPromises.push(exportKeyPair(session.sendRatchetKeyPair, 'sendRatchetKeyPair'));
+
+  // Handle skippedMessageKeys (Dictionary) - DEEP COPY and PRUNING
+  if (session.skippedMessageKeys) {
+    const serializedSkipped = {};
+    const currentRecvIdx = session.nextRecvIndex || 0;
+    const MAX_GAP = 100; // Forward Secrecy: Prune skipped keys that are too far behind
+
+    for (const [keyLabel, key] of Object.entries(session.skippedMessageKeys)) {
+      // Label format: ${publicKeyBase64}_${index}
+      const parts = keyLabel.split('_');
+      const msgIdx = parseInt(parts[parts.length - 1]);
+
+      if (key instanceof CryptoKey) {
+        // Only bundle keys that are within the safety window
+        if (isNaN(msgIdx) || (currentRecvIdx - msgIdx) < MAX_GAP) {
+          const jwk = await window.crypto.subtle.exportKey('jwk', key);
+          serializedSkipped[keyLabel] = { _isJWK: true, jwk };
+        } else {
+          console.debug(`[CRYPTO-Prune] Skipping stale key: ${keyLabel}`);
+        }
+      }
+    }
+    serialized.skippedMessageKeys = serializedSkipped;
+  }
+  
+  serialized.vaultTimestamp = Date.now();
+
+  await Promise.all(keyPromises);
+  console.debug(`[CRYPTO-Serialize] Session for ${session.userId || 'unknown'} serialized. Index: ${session.nextRecvIndex}`);
+  return serialized;
+}
+
+/**
+ * Deserializes a session object, restoring primitives and importing JWK blobs to CryptoKeys.
+ */
+export async function deserializeSession(serialized) {
+  if (!serialized) return null;
+
+  // 1. Initial Spread: Recovers all primitive values (nextRecvIndex, status, etc.)
+  const session = { ...serialized };
+  const importPromises = [];
+
+  const aesAlg = { name: 'AES-GCM', length: 256 };
+  const aesUsages = ['encrypt', 'decrypt'];
+  const ratchetAlg = { name: 'X25519' };
+  const ratchetUsages = ['deriveKey', 'deriveBits'];
+
+  // Root/Chain Recovery
+  if (serialized.rootKey?._isJWK) {
+    importPromises.push((async () => {
+       session.rootKey = await importKeyFromJWK(serialized.rootKey.jwk, aesAlg, aesUsages);
+    })());
+  }
+  if (serialized.sendChainKey?._isJWK) {
+    importPromises.push((async () => {
+       session.sendChainKey = await importKeyFromJWK(serialized.sendChainKey.jwk, aesAlg, aesUsages);
+    })());
+  }
+  if (serialized.recvChainKey?._isJWK) {
+    importPromises.push((async () => {
+       session.recvChainKey = await importKeyFromJWK(serialized.recvChainKey.jwk, aesAlg, aesUsages);
+    })());
+  }
+
+  // KeyPair Reconstitution (Critical fix for "privateKey is undefined" and "key_ops" DataError)
+  const restoreKeyPair = async (name, alg, privUsages) => {
+    const data = serialized[name];
+    if (!data) return;
+    
+    session[name] = { ...data }; // Preserve metadata like publicKeyBase64
+    
+    // Public keys for X25519 MUST use empty usages [ ] in importKey
+    if (data.publicKey?._isJWK) {
+      session[name].publicKey = await importKeyFromJWK(data.publicKey.jwk, alg, []);
+    }
+    
+    // Private keys use the provided derivation usages
+    if (data.privateKey?._isJWK) {
+      session[name].privateKey = await importKeyFromJWK(data.privateKey.jwk, alg, privUsages);
+    }
+  };
+
+  importPromises.push(restoreKeyPair('identityKeyPair', ratchetAlg, ratchetUsages));
+  importPromises.push(restoreKeyPair('ephemeralKeyPair', ratchetAlg, ratchetUsages));
+  importPromises.push(restoreKeyPair('sendRatchetKeyPair', ratchetAlg, ratchetUsages));
+
+  // Dictionary Recovery for skippedMessageKeys
+  if (serialized.skippedMessageKeys) {
+    const deserializedSkipped = {};
+    for (const [idx, data] of Object.entries(serialized.skippedMessageKeys)) {
+      if (data?._isJWK) {
+        importPromises.push((async () => {
+          deserializedSkipped[idx] = await importKeyFromJWK(data.jwk, aesAlg, aesUsages);
+        })());
+      }
+    }
+    session.skippedMessageKeys = deserializedSkipped;
+  }
+
+  await Promise.all(importPromises);
+  
+  // Validation Audit
+  if (session.nextRecvIndex === undefined) {
+    console.error('[E2EE-Deserialization] CRITICAL ERROR: nextRecvIndex is UNDEFINED after recovery.');
+    console.debug('[E2EE-Deserialization] Serialized object keys:', Object.keys(serialized));
+  } else {
+    console.log(`[E2EE-Deserialization] session restored. nextRecvIndex: ${session.nextRecvIndex}`);
+  }
+
+  return session;
 }

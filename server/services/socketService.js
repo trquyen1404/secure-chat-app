@@ -1,7 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const Message = require('../models/Message');
-const webpush = require('web-push');
+const { User, Message, Block } = require('../models');
 const { Op } = require('sequelize');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -61,10 +59,25 @@ module.exports = (io) => {
     // 1. Xử lý gửi tin nhắn (E2EE - Double Ratchet)
     socket.on('sendMessage', async (data) => {
       try {
-        const { recipientId, encryptedContent, ratchetKey, n, pn, iv, replyToId, senderEk, usedOpk, localId, expiresInSeconds } = data;
+        const { recipientId, encryptedContent, ratchetKey, n, pn, iv, replyToId, senderEk, usedOpk, localId, type } = data;
+        
+        console.log(`[RX-Trace] Received packet. n=${n} Handshake=${!!senderEk} Type=${type || 'text'}`);
 
-        if (!recipientId || !encryptedContent || !iv) {
-          return socket.emit('error', { message: 'Dữ liệu tin nhắn không hợp lệ' });
+        // Relax validation: Allow packets without encryptedContent IF they are handshakes (senderEk) or ACKs
+        const isHandshake = !!senderEk;
+        const isAck = type === 'handshake_ack';
+        if (!recipientId || (!encryptedContent && !isHandshake && !isAck)) {
+           return socket.emit('error', { message: 'Invalid message data (Empty payload rejected)' });
+        }
+
+        // [Security] Block List Enforcement
+        const isBlocked = await Block.findOne({
+          where: { blockerId: recipientId, blockedId: socket.userId }
+        });
+        if (isBlocked) {
+          console.warn(`[BLOCK] Silencing message from ${socket.userId} to ${recipientId} (Blocked)`);
+          // We return success to the sender to avoid letting them know they are blocked (Stealth Block)
+          return socket.emit('newMessage', { ...data, senderId: socket.userId, createdAt: new Date() });
         }
 
         const message = await Message.create({
@@ -99,6 +112,7 @@ module.exports = (io) => {
           reactions: {},
           readAt: null,
           createdAt: message.createdAt,
+          type: type || 'text'
         };
 
         // Gửi cho người gửi (để cập nhật trạng thái đã gửi) và người nhận
@@ -128,7 +142,23 @@ module.exports = (io) => {
       }
     });
 
-    // 2. Thu hồi tin nhắn
+    socket.on('handshake_ack', async (data) => {
+      try {
+        const { recipientId } = data;
+        if (!recipientId) return;
+        const recipientSocketId = userSockets.get(recipientId);
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('handshake_ack', {
+            ...data,
+            senderId: socket.userId,
+            type: 'handshake_ack'
+          });
+        }
+      } catch (error) {
+        console.error('[socket] handshake_ack error:', error);
+      }
+    });
+
     socket.on('deleteMessage', async ({ messageId, recipientId }) => {
       try {
         const msg = await Message.findByPk(messageId);

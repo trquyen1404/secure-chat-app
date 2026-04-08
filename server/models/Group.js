@@ -19,4 +19,10 @@ const Group = sequelize.define('Group', {
   timestamps: true,
 });
 
+Group.associate = (models) => {
+  Group.hasMany(models.GroupMember, { foreignKey: 'groupId', as: 'Members' });
+  Group.belongsToMany(models.User, { through: models.GroupMember, foreignKey: 'groupId', otherKey: 'userId', as: 'Users' });
+  Group.hasMany(models.GroupMessage, { foreignKey: 'groupId', as: 'Messages' });
+};
+
 module.exports = Group;

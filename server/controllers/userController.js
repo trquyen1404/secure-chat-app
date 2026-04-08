@@ -1,15 +1,24 @@
 const { Op, Sequelize } = require('sequelize');
-const User = require('../models/User');
-const PreKey = require('../models/PreKey');
-const PinnedChat = require('../models/PinnedChat');
-const Friendship = require('../models/Friendship');
-const Message = require('../models/Message');
-
-// ── X3DH PreKey Management ──────────────────────────────────────────────────
+const { User, PreKey, Block } = require('../models');
 
 exports.getPreKeyBundle = async (req, res) => {
   try {
     const { userId } = req.params;
+
+    // [Security] Block check - Prevent key bundle retrieval if blocking is active
+    const isBlocked = await Block.findOne({
+      where: {
+        [Op.or]: [
+          { blockerId: req.userId, blockedId: userId },
+          { blockerId: userId, blockedId: req.userId }
+        ]
+      }
+    });
+
+    if (isBlocked) {
+      return res.status(403).json({ error: 'Truy cập bị từ chối (Blocking active)' });
+    }
+
     const user = await User.findByPk(userId, { attributes: ['id', 'username', 'publicKey', 'dhPublicKey'] });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -91,8 +100,22 @@ async function getContactIds(userId) {
 
 exports.getUsers = async (req, res) => {
   try {
+    // [Security] Fetch users who have NOT blocked us and whom we have NOT blocked
+    const blocks = await Block.findAll({
+      where: { [Op.or]: [{ blockerId: req.userId }, { blockedId: req.userId }] },
+      raw: true
+    });
+    const blockedIds = blocks.map(b => b.blockerId === req.userId ? b.blockedId : b.blockerId);
+
     const users = await User.findAll({
-      where: { id: { [Op.ne]: req.userId } },
+      where: { 
+        id: { 
+          [Op.and]: [
+            { [Op.ne]: req.userId },
+            { [Op.notIn]: blockedIds }
+          ]
+        } 
+      },
       attributes: ['id', 'username', 'online', 'avatarUrl', 'themeColor', 'lastSeenAt', 'publicKey', 'dhPublicKey']
     });
     res.json(users);
@@ -222,15 +245,88 @@ exports.pinChat = async (req, res) => {
   }
 };
 
-exports.unpinChat = async (req, res) => {
+exports.uploadVault = async (req, res) => {
   try {
-    const { targetUserId } = req.params;
-    await PinnedChat.destroy({
-      where: { userId: req.userId, targetUserId }
-    });
+    const { vaultData } = req.body;
+    if (!vaultData) return res.status(400).json({ error: 'Vault data is required' });
+    
+    await User.update({ vaultData }, { where: { id: req.userId } });
+    console.log(`[VAULT] User ${req.userId} uploaded specialized vault data (size: ${vaultData.length})`);
     res.json({ success: true });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to unpin chat' });
+    console.error('[VAULT Upload Error]', error);
+    res.status(500).json({ error: 'Failed to upload vault data' });
+  }
+};
+
+exports.downloadVault = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId, { attributes: ['vaultData'] });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    console.log(`[VAULT] User ${req.userId} downloaded vault data (size: ${user.vaultData?.length || 0})`);
+    res.json({ vaultData: user.vaultData || null });
+  } catch (error) {
+    console.error('[VAULT Download Error]', error);
+    res.status(500).json({ error: 'Failed to download vault data' });
+  }
+};
+
+// ── Block List Logic ──────────────────
+
+exports.blockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'User ID to block is required' });
+    if (userId === req.userId) return res.status(400).json({ error: 'You cannot block yourself' });
+
+    await Block.findOrCreate({
+      where: { blockerId: req.userId, blockedId: userId }
+    });
+
+    res.json({ success: true, message: 'User blocked' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to block user' });
+  }
+};
+
+exports.unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    await Block.destroy({
+      where: { blockerId: req.userId, blockedId: userId }
+    });
+    res.json({ success: true, message: 'User unblocked' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unblock user' });
+  }
+};
+
+exports.getBlockedUsers = async (req, res) => {
+  try {
+    const blocks = await Block.findAll({
+      where: { blockerId: req.userId },
+      include: [{ model: User, as: 'BlockedUser', attributes: ['id', 'username', 'avatarUrl'] }]
+    });
+    res.json(blocks);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch blocked users' });
+  }
+};
+
+exports.getProfile = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId, { 
+      attributes: [
+        'id', 'username', 'avatarUrl', 'themeColor', 
+        'online', 'lastSeenAt', 'publicKey', 'dhPublicKey',
+        'encryptedPrivateKey', 'keyBackupSalt', 'keyBackupIv'
+      ] 
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (error) {
+    console.error('[PROFILE Error]', error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
   }
 };
