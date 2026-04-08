@@ -4,16 +4,15 @@ import { useAuth } from './context/AuthContext';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import ChatApp from './pages/ChatApp';
-import { clearRatchetDB } from './utils/ratchetStore';
-import { clearKeyStore } from './utils/keyStore';
+
 import RestoreKeyModal from './components/RestoreKeyModal';
 
 const PrivateRoute = ({ children }) => {
   const { token, loading, needsPassphraseRestore } = useAuth();
   if (loading) return null;
-  
+
   if (!token) return <Navigate to="/login" replace />;
-  
+
   return (
     <>
       {children}
@@ -28,10 +27,10 @@ function App() {
     const CURRENT_V = 'v19_1_deadlock_breaker';
     if (localStorage.getItem('crypto_version') !== CURRENT_V) {
       console.warn('New protocol detected. Clearing old security data...');
-      
+
       localStorage.setItem('crypto_version', CURRENT_V);
       localStorage.removeItem('token'); // Force re-auth
-      
+
       Promise.all([
         clearRatchetDB(),
         clearKeyStore()
@@ -53,6 +52,11 @@ function App() {
         <Route path="/" element={
           <PrivateRoute>
             <ChatApp />
+          </PrivateRoute>
+        } />
+        <Route path="/benchmark" element={
+          <PrivateRoute>
+            <BenchmarkMode />
           </PrivateRoute>
         } />
       </Routes>

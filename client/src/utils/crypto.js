@@ -1,8 +1,6 @@
 /**
  * crypto.js — Advanced End-to-End Encryption (E2EE) Primitives
- * VERSION 1.9.2 (Stable + AD Sync)
- * 
- * Implements: X3DH Key Agreement, Double Ratchet (KDF & DH), HKDF (SHA-256), AES-256-GCM (AEAD).
+ * VERSION 1.9.3 (Final Stable)
  */
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -21,7 +19,6 @@ export function getAssociatedData(id01, id02) {
   return ad;
 }
 
-// Helper for diagnostic logging (fingerprints, not the keys themselves)
 export async function getFingerprint(buffer) {
   const hash = await window.crypto.subtle.digest('SHA-256', buffer);
   return arrayBufferToBase64(hash).slice(0, 8);
@@ -84,7 +81,7 @@ export async function signDataECDSA(privateKey, dataBuffer) {
 export async function verifySignatureECDSA(publicKeyBase64, signatureBase64, dataBuffer) {
   const publicKeyRaw = base64ToArrayBuffer(publicKeyBase64);
   const sigBytes = base64ToArrayBuffer(signatureBase64);
-  
+
   const publicKey = await window.crypto.subtle.importKey(
     'raw',
     publicKeyRaw,
@@ -114,13 +111,24 @@ export async function generateX25519KeyPair() {
   return { publicKey: keyPair.publicKey, privateKey: keyPair.privateKey, publicKeyBase64 };
 }
 
-// Helper to export X25519 public key to Base64
 export async function exportX25519Base64(publicKey) {
   const raw = await window.crypto.subtle.exportKey('raw', publicKey);
   return arrayBufferToBase64(raw);
 }
 
-// ── HKDF (HMAC-based Key Derivation Function) ────────────────────────────────
+export async function importX25519Public(b64) {
+  if (!b64) throw new Error("Public key base64 is missing");
+  const buffer = base64ToArrayBuffer(b64);
+  return window.crypto.subtle.importKey(
+    'raw',
+    buffer,
+    { name: 'X25519' },
+    true,
+    []
+  );
+}
+
+// ── HKDF (Key Derivation) ────────────────────────────────────────────────────
 
 export async function hkdfDerive(masterSecret, salt, info, length = 256) {
   // [Fix] Explicitly wrap inputs in Uint8Array for browser-agnostic deterministic derivation
@@ -151,7 +159,7 @@ export async function hkdfDerive(masterSecret, salt, info, length = 256) {
   const rawKey = await window.crypto.subtle.exportKey('raw', key);
   const fp = await getFingerprint(rawKey);
   console.log(`[CRYPTO] Derived Key (Info: ${info}) Fingerprint: ${fp}`);
-  
+
   return key;
 }
 
@@ -160,21 +168,18 @@ export async function hkdfDerive(masterSecret, salt, info, length = 256) {
 export async function x3dhInitiatorHandshake(
   aliceIKdh_priv,
   aliceEK_priv,
-  bobIKsign_pub_b64,
   bobIKdh_pub_b64,
+  bobDH_pub_b64,
   bobSPK_pub_b64,
   bobSPK_signature_b64,
   bobOPK_pub_b64 = null
 ) {
   const spkBytes = base64ToArrayBuffer(bobSPK_pub_b64);
-  const isValid = await verifySignatureECDSA(bobIKsign_pub_b64, bobSPK_signature_b64, spkBytes);
+  const isValid = await verifySignatureECDSA(bobIKdh_pub_b64, bobSPK_signature_b64, spkBytes);
   if (!isValid) throw new Error("Bob's Signed PreKey signature verification failed!");
 
-  const bobIKdh_pub = await importX25519Public(bobIKdh_pub_b64);
+  const bobIKdh_pub = await importX25519Public(bobDH_pub_b64 || bobIKdh_pub_b64);
   const bobSPK_pub = await importX25519Public(bobSPK_pub_b64);
-
-  console.log(`[X3DH-Audit] Peer Identity Key (IK): ${await getFingerprint(base64ToArrayBuffer(bobIKdh_pub_b64))}`);
-  console.log(`[X3DH-Audit] Peer Signed Prekey (SPK): ${await getFingerprint(base64ToArrayBuffer(bobSPK_pub_b64))}`);
 
   const dh1 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: bobSPK_pub }, aliceIKdh_priv, 256);
   const dh2 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: bobIKdh_pub }, aliceEK_priv, 256);
@@ -188,15 +193,12 @@ export async function x3dhInitiatorHandshake(
   }
 
   const combinedSecret = concatUint8Arrays(...secrets);
-  console.log(`[X3DH-Audit] Combined Secret (Raw) FP: ${await getFingerprint(combinedSecret.buffer)}`);
-  
   const rootKey = await hkdfDerive(combinedSecret, null, 'ROOT_KEY_V5');
   const rawRoot = await window.crypto.subtle.exportKey('raw', rootKey);
-  
+
   const sendChainKey = await hkdfDerive(rawRoot, null, 'SENDER_CHAIN_V1');
   const recvChainKey = await hkdfDerive(rawRoot, null, 'RECEIVER_CHAIN_V1');
 
-  console.log(`[X3DH-Init] FINAL ROOT FP: ${await getFingerprint(rawRoot)}`);
   return { rootKey, sendChainKey, recvChainKey };
 }
 
@@ -210,9 +212,6 @@ export async function x3dhResponderHandshake(
   const aliceIKdh_pub = await importX25519Public(aliceIKdh_pub_b64);
   const aliceEK_pub = await importX25519Public(aliceEK_pub_b64);
 
-  console.log(`[X3DH-Audit] Peer Identity Key (IK): ${await getFingerprint(base64ToArrayBuffer(aliceIKdh_pub_b64))}`);
-  console.log(`[X3DH-Audit] Peer Ephemeral Key (EK): ${await getFingerprint(base64ToArrayBuffer(aliceEK_pub_b64))}`);
-
   const dh1 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: aliceIKdh_pub }, bobSPK_priv, 256);
   const dh2 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: aliceEK_pub }, bobIKdh_priv, 256);
   const dh3 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: aliceEK_pub }, bobSPK_priv, 256);
@@ -224,19 +223,16 @@ export async function x3dhResponderHandshake(
   }
 
   const combinedSecret = concatUint8Arrays(...secrets);
-  console.log(`[X3DH-Audit] Combined Secret (Raw) FP: ${await getFingerprint(combinedSecret.buffer)}`);
-  
   const rootKey = await hkdfDerive(combinedSecret, null, 'ROOT_KEY_V5');
   const rawRoot = await window.crypto.subtle.exportKey('raw', rootKey);
-  
+
   const sendChainKey = await hkdfDerive(rawRoot, null, 'RECEIVER_CHAIN_V1');
   const recvChainKey = await hkdfDerive(rawRoot, null, 'SENDER_CHAIN_V1');
 
-  console.log(`[X3DH-Resp] FINAL ROOT FP: ${await getFingerprint(rawRoot)}`);
   return { rootKey, sendChainKey, recvChainKey };
 }
 
-// ── Double Ratchet Logic ─────────────────────────────────────────────────────
+// ── Double Ratchet ───────────────────────────────────────────────────────────
 
 export async function ratchetChain(chainKey) {
   const rawKey = await window.crypto.subtle.exportKey('raw', chainKey);
@@ -252,56 +248,26 @@ export async function ratchetRoot(rootKey, dhSecret) {
   return { newRootKey, newChainKey };
 }
 
-// ── Multi-Step Message Encryption ────────────────────────────────────────────
+// ── AES-GCM Encryption/Decryption ────────────────────────────────────────────
 
 export async function encryptMessageGCM(plaintext, key, associatedData = null) {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
-  
   const algorithm = { name: 'AES-GCM', iv };
-  if (associatedData) {
-    algorithm.additionalData = new TextEncoder().encode(associatedData);
-  }
+  if (associatedData) algorithm.additionalData = new TextEncoder().encode(associatedData);
 
-  const ciphertext = await window.crypto.subtle.encrypt(
-    algorithm,
-    key,
-    encoded
-  );
-
-  const iv_fp = await getFingerprint(iv);
-  if (associatedData) {
-    console.log(`[CRYPTO-Audit] Encrypting (n=${plaintext?.n ?? '?'}) with AD: "${associatedData}" (IV FP: ${iv_fp})`);
-  } else {
-    console.log(`[CRYPTO-Audit] Encrypting (n=${plaintext?.n ?? '?'}) with IV FP: ${iv_fp}`);
-  }
-
-  return {
-    ciphertextB64: arrayBufferToBase64(ciphertext),
-    ivB64: arrayBufferToBase64(iv)
-  };
+  const ciphertext = await window.crypto.subtle.encrypt(algorithm, key, encoded);
+  return { ciphertextB64: arrayBufferToBase64(ciphertext), ivB64: arrayBufferToBase64(iv) };
 }
 
 export async function decryptMessageGCM(ciphertextB64, ivB64, key, associatedData = null) {
   try {
     const iv = base64ToArrayBuffer(ivB64);
     const data = base64ToArrayBuffer(ciphertextB64);
-
-    const iv_fp = await getFingerprint(iv);
-    
     const algorithm = { name: 'AES-GCM', iv };
-    if (associatedData) {
-      algorithm.additionalData = new TextEncoder().encode(associatedData);
-      console.log(`[CRYPTO-Audit] Decrypting (n=?) with AD: "${associatedData}" (IV FP: ${iv_fp})`);
-    } else {
-      console.log(`[CRYPTO-Audit] Decrypting (n=?) with IV FP: ${iv_fp}`);
-    }
+    if (associatedData) algorithm.additionalData = new TextEncoder().encode(associatedData);
 
-    const decrypted = await window.crypto.subtle.decrypt(
-      algorithm,
-      key,
-      data
-    );
+    const decrypted = await window.crypto.subtle.decrypt(algorithm, key, data);
     return new TextDecoder().decode(decrypted);
   } catch (err) {
     console.error(`[CRYPTO] Decryption failed! (AD: "${associatedData}", IV FP: ${await getFingerprint(base64ToArrayBuffer(ivB64))})`, err);
@@ -309,24 +275,13 @@ export async function decryptMessageGCM(ciphertextB64, ivB64, key, associatedDat
   }
 }
 
-// ── PIN-based Identity Protection ─────────────────────
+// ── PIN Protection (PBKDF2) ──────────────────────────────────────────────────
 
 export async function pbkdf2Derive(pin, salt, iterations = 100000) {
   const enc = new TextEncoder();
-  const baseKey = await window.crypto.subtle.importKey(
-    'raw',
-    enc.encode(pin),
-    'PBKDF2',
-    false,
-    ['deriveKey']
-  );
+  const baseKey = await window.crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveKey']);
   return window.crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt,
-      iterations,
-      hash: 'SHA-256'
-    },
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
     baseKey,
     { name: 'AES-GCM', length: 256 },
     true,
@@ -404,10 +359,10 @@ export async function unwrapIdentityBundleWithPIN(wrappedKeyB64, saltB64, ivB64,
   const ciphertext = base64ToArrayBuffer(wrappedKeyB64);
   const salt = base64ToArrayBuffer(saltB64);
   const iv = base64ToArrayBuffer(ivB64);
-  
+
   const aesKey = await pbkdf2Derive(pin, new Uint8Array(salt));
   const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, aesKey, ciphertext);
-  
+
   const bundle = JSON.parse(new TextDecoder().decode(decrypted));
 
   return { 

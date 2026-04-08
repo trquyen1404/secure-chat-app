@@ -1,15 +1,111 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
+import PinLock from '../components/PinLock';
+import { useAuth } from '../context/AuthContext';
+import api from '../utils/axiosConfig';
 
 const ChatApp = () => {
+  const { user } = useAuth();
+  
   const [selectedUser, setSelectedUser] = useState(null);
+  
+  // App Lock states
+  const [hasPinSetup, setHasPinSetup] = useState(true); // default true to prevent flickering
+  const [isAppUnlocked, setIsAppUnlocked] = useState(false);
+  
+  // Chat Lock states
+  const [chatUnlockedFor, setChatUnlockedFor] = useState(null); // stores user ID that is unlocked
+
+  useEffect(() => {
+    if (user) {
+      const storedPin = localStorage.getItem(`app_pin_${user.id}`);
+      if (storedPin) {
+        setHasPinSetup(true);
+        setIsAppUnlocked(false);
+      } else {
+        setHasPinSetup(false);
+        setIsAppUnlocked(false);
+      }
+
+      // --- Push Notification Registration ---
+      if ('serviceWorker' in navigator && 'PushManager' in window && !window.pushRegistered) {
+        window.pushRegistered = true; // prevent multiple triggers
+        const registerPush = async () => {
+          try {
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            console.log('SW Registered');
+
+            const vapidRes = await api.get('/api/push/vapidPublicKey');
+            const publicKey = vapidRes.data.publicKey;
+
+            // Convert base64 to Uint8Array
+            const padding = '='.repeat((4 - publicKey.length % 4) % 4);
+            const base64 = (publicKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+
+            const subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: outputArray
+            });
+
+            await api.post('/api/push/subscribe', subscription);
+            console.log('Push subscription sent to backend');
+          } catch (err) {
+            console.error('Push registration error:', err);
+          }
+        };
+        Notification.requestPermission().then(permission => {
+          if (permission === 'granted') registerPush();
+        });
+      }
+    }
+  }, [user]);
+
+  const handleSelectUser = (u) => {
+    if (selectedUser?.id !== u.id) {
+       setSelectedUser(u);
+       setChatUnlockedFor(null); // lock again for new user
+    }
+  };
+
+  const handleAppUnlockSuccess = () => {
+    setIsAppUnlocked(true);
+  };
+
+  const handleAppSetupSuccess = () => {
+    setHasPinSetup(true);
+    setIsAppUnlocked(true);
+  };
+
+  const handleChatUnlockSuccess = () => {
+    setChatUnlockedFor(selectedUser.id);
+  };
+
+  const handleCancelChatLock = () => {
+    setSelectedUser(null);
+    setChatUnlockedFor(null);
+  };
+
+  if (!user) return null;
 
   return (
-    <div className="h-screen w-screen flex bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-200 overflow-hidden transition-colors duration-500">
+    <div className="h-screen w-screen flex bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-200 overflow-hidden relative transition-colors duration-500">
+      
+      {/* 1. App Level Lock: Show full screen PinLock if app is not unlocked */}
+      {!isAppUnlocked && !hasPinSetup && (
+        <PinLock userId={user.id} mode="setup" onSuccess={handleAppSetupSuccess} />
+      )}
+      {!isAppUnlocked && hasPinSetup && (
+        <PinLock userId={user.id} mode="verifyApp" onSuccess={handleAppUnlockSuccess} />
+      )}
+
+      {/* 2. Main App: Only visible properly if unlocked (or partially behind backdrop) */}
       <Sidebar 
         selectedUser={selectedUser} 
-        onSelectUser={setSelectedUser} 
+        onSelectUser={handleSelectUser} 
       />
       
       {selectedUser ? (

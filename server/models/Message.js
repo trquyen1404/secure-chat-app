@@ -74,6 +74,10 @@ const Message = sequelize.define('Message', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  expiresInSeconds: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  }
 }, {
   timestamps: true,
   indexes: [

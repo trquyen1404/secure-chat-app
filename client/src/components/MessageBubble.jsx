@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Code2, Lock, FileText, Download, Headphones, Trash2, CornerUpLeft, Smile, Check, CheckCheck } from 'lucide-react';
+import { Code2, Lock, FileText, Download, Headphones, Trash2, CornerUpLeft, Smile, Check, CheckCheck, Timer } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessage }) => {
@@ -118,6 +118,11 @@ const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessa
              <div className="flex justify-between flex-wrap items-center gap-3 mb-1.5">
                <span className={`font-medium text-[11px] opacity-70 uppercase tracking-wide flex items-center gap-1 ${isMe ? 'text-indigo-100' : 'text-slate-400'}`}>
                   {isMe ? 'Bạn' : 'Đối tác'}
+                  {message.expiresInSeconds && (
+                    <span className="flex items-center gap-0.5 ml-1 text-amber-400" title={`Tự huỷ sau ${message.expiresInSeconds}s kể từ lúc xem`}>
+                       <Timer className="w-3 h-3" /> {message.expiresInSeconds}s
+                    </span>
+                  )}
                </span>
                <button 
                  type="button"

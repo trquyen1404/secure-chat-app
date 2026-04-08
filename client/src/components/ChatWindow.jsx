@@ -13,18 +13,17 @@ import {
   encryptMessageGCM,
   decryptMessageGCM,
   importX25519Public,
-  getFingerprint,
   getAssociatedData,
-  arrayBufferToBase64,
-  base64ToArrayBuffer
 } from '../utils/crypto';
 import { loadSession, saveSession, saveDecryptedMessage, getDecryptedMessage, updateDecryptedMessageId } from '../utils/ratchetStore';
 import { getKey } from '../utils/keyStore';
 import MessageBubble from './MessageBubble';
+import UserProfileModal from './UserProfileModal';
+
 import {
   Send, Lock, Loader2, ArrowLeft, ShieldCheck,
-  ImagePlus, Paperclip, Mic, MicOff, Disc2, Trash2,
-  Phone, Video, CornerUpLeft, X
+  ImagePlus, Paperclip, Mic, MicOff, Disc2,
+  Trash2, Phone, Video, X, Search, Timer
 } from 'lucide-react';
 
 const ChatWindow = ({ user: chatUser, onClose }) => {
@@ -32,6 +31,12 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const [newMessage, setNewMessage] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [expiresIn, setExpiresIn] = useState(null);
+  const [replyMessage, setReplyMessage] = useState(null);
+
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -39,6 +44,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const { token, user: currentUser, masterKey } = useAuth();
   const { socket, onlineUsers } = useSocket();
   const { callUser } = useCall();
+
   const messagesEndRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const typingTimeout = useRef(null);
@@ -47,18 +53,30 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const isOnline = onlineUsers.has(chatUser.id) || chatUser.online;
+  const autoInitRef = useRef(new Set());
+  const initPromiseRef = useRef(null);
 
+  const isOnline = onlineUsers.has(chatUser.id) || chatUser.online;
+  const getAD = () => getAssociatedData(currentUser.id, chatUser?.id);
+
+  // -- Speech Recognition Setup --
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
-      const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = 'vi-VN';
+      const r = new SR();
+      r.continuous = true;
+      r.interimResults = true;
+      r.lang = 'vi-VN';
       r.onresult = (e) => {
         let t = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) t += e.results[i][0].transcript;
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) t += e.results[i][0].transcript;
+        }
         if (t) setNewMessage((p) => p + (p ? ' ' : '') + t);
       };
-      r.onerror = () => setIsListening(false); r.onend = () => setIsListening(false); recognitionRef.current = r;
+      r.onerror = () => setIsListening(false);
+      r.onend = () => setIsListening(false);
+      recognitionRef.current = r;
     }
   }, []);
 
@@ -247,7 +265,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           rootKey, sendChainKey, recvChainKey,
           nextSendIndex: 0, nextRecvIndex: 0, skippedMessageKeys: {},
           sendRatchetKeyPair: await generateX25519KeyPair(),
-          recvRatchetPublicKey: bundle.signedPreKey.publicKey, 
+          recvRatchetPublicKey: bundle.signedPreKey.publicKey,
           pendingSenderEk: ek.publicKeyBase64,
           pendingUsedOpk: bundle.oneTimePreKey?.publicKey || null,
           status: 'INITIALIZING'
@@ -279,7 +297,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         
         return newSession;
       } catch (err) {
-        console.error('[E2EE] Handshake init failed', err);
+        console.error('[E2EE] Init failed', err);
         throw err;
       } finally {
         initPromiseRef.current = null;
@@ -303,7 +321,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   };
 
   const decryptRatchet = async (msg) => {
-    if (msg.isDeleted) return '[Message revoked]';
+    if (msg.isDeleted) return '[Tin nhắn đã bị thu hồi]';
     try {
       console.log(`[E2EE-Receive] New message arrival. Sender: ${msg.senderId}, Index n: ${msg.n}, Handshake present: ${!!msg.senderEk}`);
       
@@ -361,8 +379,8 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           rootKey, sendChainKey, recvChainKey,
           nextSendIndex: 0, nextRecvIndex: 0, skippedMessageKeys: {},
           sendRatchetKeyPair: { privateKey: bobSPK_priv, publicKeyBase64: currentUser.signedPreKey || "" },
-          recvRatchetPublicKey: msg.ratchetKey || msg.senderEk, 
-          pendingSenderEk: null, status: 'ESTABLISHED'
+          recvRatchetPublicKey: msg.ratchetKey || msg.senderEk,
+          status: 'ESTABLISHED'
         };
         console.log('[E2EE-Orphan] Orphan Handshake Adoped. Session Re-aligned.');
         await saveSession(chatUser.id, session, masterKey);
@@ -596,37 +614,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         }
       }
 
-      if (isLoadMore) {
-        const c = scrollContainerRef.current;
-        const prev = c ? c.scrollHeight : 0;
-        setMessages((p) => [...decrypted, ...p]);
-        setTimeout(() => { if (c) c.scrollTop = c.scrollHeight - prev; }, 0);
-      } else {
-        setMessages(decrypted);
-        setHasMore(batch.length === 50);
-      }
-      if (!isLoadMore && socket && decrypted.some((m) => m.senderId === chatUser.id && !m.readAt)) {
-        socket.emit('markAsRead', { senderId: chatUser.id });
-      }
+      return await decryptMessageGCM(msg.encryptedContent, msg.iv, messageKey, getAD());
     } catch (err) {
-      console.error('[loadMessages]', err);
-    } finally {
-      if (isLoadMore) setIsLoadingMore(false);
-      else setLoadingHistory(false);
+      console.warn('[E2EE] Decryption error', err);
+      return '[Lỗi giải mã]';
     }
-  };
-
-  useEffect(() => {
-    if (chatUser && token) {
-      setHasMore(true);
-      getOrInitSession(chatUser.id).then(() => loadMessages()).catch(console.error);
-    }
-  }, [chatUser, token, currentUser.id]);
-
-  const handleScroll = () => {
-    const c = scrollContainerRef.current;
-    if (!c) return;
-    if (c.scrollTop === 0 && hasMore && !isLoadingMore && !loadingHistory) loadMessages(true);
   };
 
   useEffect(() => {
@@ -693,22 +685,14 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       
       let currentRatchetPub = session.sendRatchetKeyPair.publicKeyBase64;
 
-      // 1. Double Ratchet Rotation: If Bob is replying for the first time (sendChainKey is null)
-      // or if Bob has received a new DH key from Alice, he rotates.
+      // Rotate if responder's first message
       if (!session.sendChainKey) {
-        console.log('[DoubleRatchet] Initializing Responder sending chain via DH rotation...');
         const remotePublicKey = await importX25519Public(session.recvRatchetPublicKey);
-        const dhSecret = await window.crypto.subtle.deriveBits(
-          { name: 'X25519', public: remotePublicKey },
-          session.sendRatchetKeyPair.privateKey, 256
-        );
+        const dhSecret = await window.crypto.subtle.deriveBits({ name: 'X25519', public: remotePublicKey }, session.sendRatchetKeyPair.privateKey, 256);
         const { newRootKey, newChainKey } = await ratchetRoot(session.rootKey, dhSecret);
         session.rootKey = newRootKey;
         session.sendChainKey = newChainKey;
         session.nextSendIndex = 0;
-        
-        // Use this key for the first ciphertext, then rotate sendRatchetKeyPair later as per protocol
-        currentRatchetPub = session.sendRatchetKeyPair.publicKeyBase64;
       }
 
       // 1b. Proactive DH Ratchet (Forward Secrecy & Key Refresh)
@@ -789,15 +773,15 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       console.log(`[E2EE-Send] Emitting payload to socket. LocalId: ${localId}, Index n: ${currentIndex}, Handshake: ${needsHandshake}`);
       socket.emit((type === 'handshake_ack' ? 'handshake_ack' : 'sendMessage'), {
         recipientId: chatUser.id,
-        encryptedContent: ciphertextB64,
-        ratchetKey: currentRatchetPub,
+        encryptedContent: encrypted.ciphertextB64,
+        ratchetKey: session.sendRatchetKeyPair.publicKeyBase64,
         n: currentIndex,
-        pn: session.previousCounter || 0,
-        iv: ivB64,
-        senderId: currentUser.id,
-        senderEk,
-        usedOpk,
+        iv: encrypted.ivB64,
+        senderEk: session.pendingSenderEk,
+        usedOpk: session.pendingUsedOpk,
         localId: localId,
+        expiresInSeconds: expiresIn,
+        replyToId: replyMessage?.id
       });
 
       await saveSession(chatUser.id, session, masterKey);
@@ -812,7 +796,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     }); // End sequentialProcessRef
   };
 
-  const handleSendMessage = async (e, forcedText = null) => {
+  const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
     if (isRecording) { stopRecordingAndSend(); return; }
     
@@ -832,62 +816,50 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     await sendEncryptedPayload(t, localId);
   };
 
-  const handleInputTyping = (e) => {
-    setNewMessage(e.target.value);
-    if (!socket) return;
-    socket.emit('typing', { recipientId: chatUser.id });
-    if (typingTimeout.current) clearTimeout(typingTimeout.current);
-    typingTimeout.current = setTimeout(() => socket.emit('stopTyping', { recipientId: chatUser.id }), 2000);
+    const t = newMessage;
+    setNewMessage('');
+    const localId = `loc-${Date.now()}`;
+
+    setMessages(p => [...p, {
+      id: localId, senderId: currentUser.id, decryptedContent: t,
+      createdAt: new Date().toISOString(), status: 'sending'
+    }]);
+
+    await sendEncryptedPayload(t, localId);
   };
 
-  const handleImageSelect = (e) => {
-    const f = e.target.files[0]; if (!f || !f.type.startsWith('image/')) return;
-    if (f.size > 2 * 1024 * 1024) return alert('Image too large!');
-    const r = new FileReader(); r.onload = (ev) => sendEncryptedPayload(`[IMG]${ev.target.result}`);
-    r.readAsDataURL(f); e.target.value = null;
-  };
-  const handleFileSelect = (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    if (f.size > 5 * 1024 * 1024) return alert('File too large!');
-    const r = new FileReader(); r.onload = (ev) => sendEncryptedPayload(`[FILE|${f.name}]${ev.target.result}`);
-    r.readAsDataURL(f); e.target.value = null;
-  };
-
-  const toggleListen = () => {
-    if (isListening) { recognitionRef.current?.stop(); }
-    else if (recognitionRef.current) { recognitionRef.current.start(); setIsListening(true); }
-    else alert('Browser does not support Speech Recognition.');
-  };
-
-  const startRecording = async () => {
+  // -- Helpers --
+  const loadMessages = async (isLoadMore = false) => {
+    if (isLoadMore) setIsLoadingMore(true); else setLoadingHistory(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream); audioChunksRef.current = [];
-      mediaRecorderRef.current.ondataavailable = (ev) => { if (ev.data.size > 0) audioChunksRef.current.push(ev.data); };
-      mediaRecorderRef.current.onstop = () => {
-        if (!audioChunksRef.current.length) return;
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach((t) => t.stop());
-        const r = new FileReader(); r.onloadend = () => sendEncryptedPayload(`[AUDIO]${r.result}`);
-        r.readAsDataURL(blob);
-      };
-      mediaRecorderRef.current.start(); setIsRecording(true);
-    } catch { alert('Cannot access microphone.'); }
-  };
-  const stopRecordingAndSend = () => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } };
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.onstop = null; mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream?.getTracks().forEach((t) => t.stop());
-      audioChunksRef.current = []; setIsRecording(false);
+      const cursor = isLoadMore && messages.length > 0 ? messages[0].createdAt : null;
+      const res = await api.get(`/api/messages/${chatUser.id}${cursor ? `?cursor=${cursor}` : ''}`);
+      const batch = res.data;
+
+      const decrypted = [];
+      for (const msg of batch) {
+        decrypted.push({ ...msg, decryptedContent: await decryptRatchet(msg) });
+      }
+
+      setMessages(p => isLoadMore ? [...decrypted, ...p] : decrypted);
+      setHasMore(batch.length === 50);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoadingMore(false); setLoadingHistory(false);
     }
   };
 
-  const handleDeleteMessage = (id) => { if (window.confirm('Revoke this message?')) socket.emit('deleteMessage', { messageId: id, recipientId: chatUser.id }); };
-  const handleReactMessage = (id, reaction) => socket.emit('reactMessage', { messageId: id, recipientId: chatUser.id, reaction });
+  useEffect(() => {
+    if (chatUser.id) {
+      getOrInitSession(chatUser.id).then(() => loadMessages());
+    }
+  }, [chatUser.id]);
 
-
-  
+  const handleScroll = () => {
+    const c = scrollContainerRef.current;
+    if (c && c.scrollTop === 0 && hasMore && !isLoadingMore) loadMessages(true);
+  };
 
   useEffect(() => {
     // Proactive Silent Handshake: 
@@ -919,28 +891,27 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   }, [chatUser.id]);
 
   return (
-    <div key={chatUser.id} className="flex-1 flex flex-col bg-white dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800 relative z-10 w-full transition-colors duration-300">
-      <div className="absolute inset-0 dark:bg-gradient-to-b dark:from-slate-900 dark:via-slate-900/90 dark:to-slate-950 pointer-events-none"></div>
+    <div className="flex-1 flex flex-col bg-white dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800 relative z-10 w-full transition-colors duration-300">
+      {showUserProfile && <UserProfileModal userId={chatUser.id} onClose={() => setShowUserProfile(false)} />}
 
       {/* Header */}
-      <div className="h-[72px] px-6 flex items-center justify-between border-b border-gray-200 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shrink-0 sticky top-0 z-20 shadow-sm">
+      <div className="h-[72px] px-6 flex items-center justify-between border-b border-gray-200 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shrink-0 sticky top-0 z-20">
         <div className="flex items-center gap-4">
-          <button onClick={onClose} className="p-2 -ml-2 text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition md:hidden">
-            <ArrowLeft className="w-5 h-5" />
+          <button onClick={onClose} className="p-2 md:hidden text-gray-500"><ArrowLeft /></button>
+          <button onClick={() => setShowUserProfile(true)} className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex justify-center items-center text-white font-bold">
+                {chatUser.username.charAt(0).toUpperCase()}
+              </div>
+              {isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full"></div>}
+            </div>
+            <div className="text-left">
+              <h2 className="font-semibold dark:text-white">{chatUser.username}</h2>
+              <div className="flex items-center gap-1 text-xs text-slate-400">
+                <ShieldCheck className="w-3 h-3 text-indigo-400" /> E2EE Secured
+              </div>
+            </div>
           </button>
-          <div className="relative">
-            <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex justify-center items-center text-white font-bold text-lg shadow-lg shadow-purple-500/20">
-              {chatUser.username.charAt(0).toUpperCase()}
-            </div>
-            {isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-[2.5px] border-white dark:border-slate-900 rounded-full" />}
-          </div>
-          <div>
-            <h2 className="font-semibold text-gray-800 dark:text-slate-100 text-[15px]">{chatUser.username}</h2>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-              X3DH + Double Ratchet E2EE
-            </div>
-          </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={handleWipeE2EE} title="Wipe E2EE State" className="w-9 h-9 rounded-full flex items-center justify-center text-red-400 hover:bg-red-500/10 transition-colors">
@@ -955,103 +926,46 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         </div>
       </div>
 
-
-
       {/* Messages */}
-      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 z-10 relative custom-scrollbar scroll-smooth">
-        {isLoadingMore && <div className="flex justify-center py-2"><Loader2 className="w-5 h-5 animate-spin text-indigo-400" /></div>}
-        <div className="text-center mb-8 mt-4">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-xs text-indigo-300 shadow-sm">
-            <Lock className="w-3.5 h-3.5" />
-            X3DH Handshake + Double Ratchet (AES-256-GCM)
-          </div>
-        </div>
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
         {loadingHistory ? (
-          <div className="flex justify-center items-center h-full"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>
+          <div className="flex justify-center py-10"><Loader2 className="animate-spin text-indigo-500" /></div>
         ) : (
-          messages.map((msg, idx) => {
-            const replied = msg.replyToId ? messages.find((m) => m.id === msg.replyToId) : null;
-            return (
-              <MessageBubble
-                key={msg.id || idx}
-                message={msg}
-                isMe={msg.senderId === currentUser.id}
-                onDelete={handleDeleteMessage}
-                onReact={handleReactMessage}
-                onReply={() => {}}
-                repliedMessage={replied}
-              />
-            );
-          })
-        )}
-        {isTyping && (
-          <div className="flex items-center gap-3 text-slate-400 mt-2 ml-4">
-            <div className="w-8 h-8 rounded-full bg-slate-800 flex justify-center items-center text-xs text-slate-300 font-bold">
-              {chatUser.username.charAt(0).toUpperCase()}
-            </div>
-            <div className="px-3 py-2.5 bg-slate-800 rounded-2xl rounded-bl-sm flex gap-1 items-center">
-              <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" />
-              <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-              <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-            </div>
-          </div>
+          messages.map((msg, idx) => (
+            <MessageBubble
+              key={msg.id || idx}
+              message={msg}
+              isMe={msg.senderId === currentUser.id}
+              onDelete={handleDeleteMessage}
+              onReact={handleReactMessage}
+            />
+          ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-gray-200 dark:border-slate-800/80 z-20 shrink-0 relative">
-        <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto flex items-center gap-2 p-4">
+      {/* Input */}
+      <div className="p-4 bg-white/90 dark:bg-slate-900/90 border-t border-gray-200 dark:border-slate-800">
+        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
           {!isRecording && (
-            <div className="flex items-center">
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 rounded-full transition-colors shrink-0">
-                <ImagePlus className="w-5 h-5" />
-              </button>
-              <button type="button" onClick={() => docInputRef.current?.click()} className="p-2.5 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-full transition-colors shrink-0">
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <button type="button" onClick={startRecording} className="p-2.5 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-full transition-colors shrink-0">
-                <Mic className="w-5 h-5" />
-              </button>
+            <div className="flex gap-1">
+              <button type="button" onClick={() => fileInputRef.current.click()} className="p-2 text-gray-400"><ImagePlus /></button>
+              <button type="button" onClick={startRecording} className="p-2 text-gray-400"><Mic /></button>
+              <button type="button" onClick={() => setExpiresIn(30)} className={`p-2 ${expiresIn ? 'text-amber-500' : 'text-gray-400'}`}><Timer /></button>
             </div>
           )}
-          <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
-          <input type="file" ref={docInputRef} onChange={handleFileSelect} className="hidden" />
-          <div className="relative flex-1 flex">
-            {isRecording ? (
-              <div className="w-full border border-red-500/50 flex-1 py-1.5 pl-6 pr-4 rounded-full bg-red-500/10 flex items-center justify-between">
-                <div className="flex items-center gap-3 text-red-500">
-                  <Disc2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm font-medium animate-pulse">Recording... (Press SEND to finish)</span>
-                </div>
-                <button type="button" onClick={cancelRecording} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-500/20 text-red-400 transition">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="relative w-full">
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={handleInputTyping}
-                  placeholder="Send secure message..."
-                  className="w-full border text-[15px] rounded-full py-3 pl-5 pr-12 outline-none transition-all shadow-inner bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 border-gray-200 dark:border-slate-700"
-                />
-                <button
-                  type="button"
-                  onClick={toggleListen}
-                  className={`absolute right-4 top-1/2 -translate-y-1/2 transition z-30 ${isListening ? 'text-emerald-500 animate-pulse' : 'text-gray-400 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400'}`}
-                >
-                  {isListening ? <Disc2 className="w-4 h-4 animate-spin" /> : <MicOff className="w-4 h-4" />}
-                </button>
-              </div>
-            )}
+          <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {/* Handle */ }} />
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={newMessage}
+              onChange={handleInputTyping}
+              placeholder="Nhắn tin bảo mật..."
+              className="w-full py-3 px-5 rounded-full bg-gray-100 dark:bg-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+            />
           </div>
-          <button
-            type="submit"
-            disabled={!isRecording && !newMessage.trim() && !isListening}
-            className="w-12 h-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-indigo-500/20 shrink-0"
-          >
-            <Send className="w-5 h-5 -ml-0.5 mt-0.5" />
+          <button type="submit" className="p-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-500 transition">
+            <Send className="w-5 h-5" />
           </button>
         </form>
       </div>
