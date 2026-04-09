@@ -87,6 +87,7 @@ app.use((err, req, res, next) => {
 });
 
 const io = new Server(server, {
+  maxHttpBufferSize: 1e7, // 10MB limit for E2EE file attachments
   cors: {
     origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],

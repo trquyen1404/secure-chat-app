@@ -233,19 +233,36 @@ export async function updateDecryptedMessageId(oldId, newId) {
 }
 
 export async function clearRatchetDB() {
-  closeRatchetDB();
+  console.log('[STORE] Initiating safe database clear (Object Stores only)...');
+  const db = await initRatchetDB();
+  
   return new Promise((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(DB_NAME);
-    request.onsuccess = () => {
-      console.log(`[STORE] RatchetDB cleared.`);
-      resolve();
-    };
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => {
-      console.warn('[STORE] RatchetDB deletion BLOCKED. Retrying after delay...');
-      // If blocked, wait and resolve anyway so logout continues
-      setTimeout(resolve, 2000);
-    };
+    try {
+      // 1. Open a readwrite transaction across all tables
+      const transaction = db.transaction([STORE_SESSIONS, STORE_MESSAGES], 'readwrite');
+      
+      transaction.oncomplete = () => {
+        console.log('[STORE] RatchetDB stores cleared successfully.');
+        resolve();
+      };
+      
+      transaction.onerror = (e) => {
+        console.error('[STORE] Transaction error during clear:', e.target.error);
+        reject(e.target.error);
+      };
+
+      // 2. Clear each store individually
+      transaction.objectStore(STORE_SESSIONS).clear();
+      transaction.objectStore(STORE_MESSAGES).clear();
+      
+    } catch (err) {
+      console.error('[STORE] Critical failure during clearRatchetDB:', err);
+      // Fallback: If transaction fails, try deleting the whole DB as a last resort
+      closeRatchetDB();
+      const request = indexedDB.deleteDatabase(DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    }
   });
 }
 

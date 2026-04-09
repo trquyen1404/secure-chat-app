@@ -10,12 +10,20 @@ import { clearKeyStore } from '../utils/keyStore';
 const Sidebar = ({ selectedUser, onSelectUser }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
-  const { token, logout, user } = useAuth();
+  const { token, logout, user, masterKey } = useAuth();
   const { onlineUsers } = useSocket();
   const { theme, toggleTheme } = useTheme();
 
   const handleWipeData = async () => {
-    if (window.confirm('CẢNH BÁO: Thao tác này sẽ xóa toàn bộ khóa và lịch sử chat trên máy này. Tiếp tục?')) {
+    if (window.confirm('CẢNH BÁO: Thao tác này sẽ xóa toàn bộ khóa và lịch sử chat trên máy này. Tiếp tục (Chúng tôi sẽ cố gắng sao lưu Két sắt trước)?')) {
+      try {
+        console.log('[WIPE] Attempting final safety sync...');
+        const { uploadVault } = await import('../utils/vaultSyncService');
+        if (masterKey) await uploadVault(masterKey);
+      } catch (err) {
+        console.warn('[WIPE] Safety sync failed, but proceeding with wipe as requested.', err.message);
+      }
+
       console.log('[WIPE] Clearing all local security data...');
       await clearRatchetDB();
       await clearKeyStore();

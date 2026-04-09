@@ -129,6 +129,31 @@ exports.uploadPreKeys = async (req, res) => {
   }
 };
 
+exports.uploadOpks = async (req, res) => {
+  try {
+    const { oneTimePreKeys } = req.body;
+    if (!oneTimePreKeys || !Array.isArray(oneTimePreKeys)) {
+      return res.status(400).json({ error: 'oneTimePreKeys array is required' });
+    }
+    
+    await User.sequelize.transaction(async (t) => {
+      await PreKey.destroy({ where: { userId: req.userId, type: 'one-time' }, transaction: t });
+      const opkRecords = oneTimePreKeys.map((k, index) => ({
+        userId: req.userId,
+        keyId: index + 1,
+        publicKey: k.publicKey,
+        type: 'one-time'
+      }));
+      await PreKey.bulkCreate(opkRecords, { transaction: t });
+    });
+    
+    res.json({ success: true, message: 'OPKs updated successfully' });
+  } catch (error) {
+    console.error('[uploadOpks error]', error);
+    res.status(500).json({ error: 'Failed to update OPKs' });
+  }
+};
+
 exports.uploadVault = async (req, res) => {
   try {
     const { vaultData } = req.body;

@@ -8,7 +8,8 @@ const {
   blockUser,
   unblockUser,
   getBlockedUsers,
-  getProfile
+  getProfile,
+  uploadOpks
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 
@@ -17,6 +18,7 @@ const router = express.Router();
 router.get('/', auth, getUsers);
 router.get('/:userId/prekey-bundle', auth, getPreKeyBundle);
 router.post('/prekeys', auth, uploadPreKeys);
+router.post('/opks', auth, uploadOpks);
 router.post('/vault', auth, uploadVault);
 router.get('/vault', auth, downloadVault);
 

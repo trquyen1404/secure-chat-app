@@ -112,6 +112,38 @@ export async function clearKeyStore() {
   });
 }
 
+export async function getAllKeys() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const reqKeys = store.getAllKeys();
+    const reqData = store.getAll();
+    
+    tx.oncomplete = () => {
+      const keys = reqKeys.result;
+      const values = reqData.result;
+      const result = keys.map((k, i) => ({ id: k, data: values[i] }));
+      resolve(result);
+    };
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+export async function importRawKeys(keyRecords) {
+  if (!keyRecords || keyRecords.length === 0) return;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    for (const record of keyRecords) {
+      store.put(record.data, record.id);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
 export async function hasKey(keyId) {
   const key = await loadKey(keyId);
   return key !== null;

@@ -62,6 +62,9 @@ function concatUint8Arrays(...arrays) {
 // ── Signature Verification (ECDSA) ───────────────────────────────────────────
 
 export async function generateECDSAKeyPair() {
+  if (!window?.crypto?.subtle) {
+    throw new Error('Web Crypto API (subtle) is not available. Please ensure you are using a Secure Context (HTTPS or localhost).');
+  }
   const keyPair = await window.crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     true,
@@ -451,7 +454,13 @@ export async function serializeSession(session) {
   if (!session) return null;
 
   // 1. Start with a shallow copy for all primitives (Indices, Status, Flags)
-  const serialized = { ...session };
+  const serialized = { 
+    ...session,
+    // [Hardening] Explicitly enforce counters stay as numbers, fallback to 0
+    nextRecvIndex: Number(session.nextRecvIndex || 0),
+    nextSendIndex: Number(session.nextSendIndex || 0),
+    previousCounter: Number(session.previousCounter || 0)
+  };
   const keyPromises = [];
 
   // Helper to export and place in serialized object safely
@@ -520,8 +529,14 @@ export async function serializeSession(session) {
 export async function deserializeSession(serialized) {
   if (!serialized) return null;
 
-  // 1. Initial Spread: Recovers all primitive values (nextRecvIndex, status, etc.)
-  const session = { ...serialized };
+  // 1. Initial Spread: Recovers all primitive values
+  const session = { 
+    ...serialized,
+    // [Hardening] Ensure indices are integers
+    nextRecvIndex: parseInt(serialized.nextRecvIndex || 0, 10),
+    nextSendIndex: parseInt(serialized.nextSendIndex || 0, 10),
+    previousCounter: parseInt(serialized.previousCounter || 0, 10)
+  };
   const importPromises = [];
 
   const aesAlg = { name: 'AES-GCM', length: 256 };

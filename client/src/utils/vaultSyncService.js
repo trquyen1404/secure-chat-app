@@ -37,9 +37,16 @@ export async function bundleAndEncryptVault(masterKey) {
   
   console.log(`[VAULT] Bundling ${messages.length} messages (Pruned from total: ${allMessages.length})...`);
 
+  // 3. Bundle KeyStore OPKs (for cross-device Double Ratchet adoption)
+  const { getAllKeys, importRawKeys } = await import('./keyStore');
+  const allKeys = await getAllKeys();
+  const opkRecords = allKeys.filter(k => k.id.startsWith('opk_priv_'));
+  console.log(`[VAULT] Bundling ${opkRecords.length} OPKs...`);
+
   const vaultBlob = {
     sessions: sessions.filter(s => s !== null),
     messages, 
+    opks: opkRecords,
     timestamp: Date.now(),
     version: '2.1' // Incremented version for metadata support
   };
@@ -99,31 +106,39 @@ export async function downloadAndRestoreVault(masterKey, onProgress = null) {
       return false;
     }
 
-    const { saveSession, bulkSaveMessages } = await import('./ratchetStore');
     const encrypted = JSON.parse(vaultData);
     const decrypted = await decryptData(encrypted.ciphertextB64, encrypted.ivB64, masterKey);
     const vaultBlob = JSON.parse(decrypted);
 
     if (onProgress) onProgress(40);
 
-    // 1. Restore Sessions
-    console.log(`[VAULT] Restoring ${vaultBlob.sessions?.length || 0} sessions...`);
-    if (vaultBlob.sessions) {
-      for (const session of vaultBlob.sessions) {
+    // 3. Restore Sessions
+    const { sessions, messages, opks, timestamp } = vaultBlob;
+    const { saveSession, bulkSaveMessages } = await import('./ratchetStore');
+    
+    console.log(`[VAULT] Restoring ${sessions?.length || 0} sessions...`);
+    if (sessions && Array.isArray(sessions)) {
+      for (const session of sessions) {
         const { userId, ...state } = session;
         if (!userId) continue;
         await saveSession(userId, state, masterKey);
       }
     }
-
     if (onProgress) onProgress(60);
 
-    // 2. Restore Message History (Using Bulk Engine)
-    console.log(`[VAULT] Restoring ${vaultBlob.messages?.length || 0} messages...`);
-    if (vaultBlob.messages) {
-      await bulkSaveMessages(vaultBlob.messages, null, (p) => {
-        if (onProgress) onProgress(60 + Math.floor(p * 0.4));
-      });
+    // 4. Restore OPKs to KeyStore
+    if (opks && Array.isArray(opks)) {
+       const { importRawKeys } = await import('./keyStore');
+       await importRawKeys(opks);
+       console.log(`[VAULT] Restored ${opks.length} OPK records to KeyStore.`);
+    }
+    if (onProgress) onProgress(80);
+
+    // 5. Restore Messages
+    if (messages && Array.isArray(messages)) {
+       await bulkSaveMessages(messages, masterKey, (p) => {
+           if (onProgress) onProgress(80 + Math.floor(p * 0.2));
+       });
     }
 
     console.log('[VAULT] Restoration complete.');

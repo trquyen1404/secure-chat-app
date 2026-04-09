@@ -72,6 +72,33 @@ const RestoreKeyModal = () => {
         console.log('[RESTORE] Session vault restoration NONE FOUND');
       }
 
+      // 5. OPK Survival Check
+      const { getAllKeys } = await import('../utils/keyStore');
+      const allKeys = await getAllKeys();
+      const hasOPKs = allKeys.some(k => k.id.startsWith(`opk_priv_${user.id}_`));
+      
+      if (!hasOPKs) {
+        console.warn('[RESTORE] No OPKs found locally or in Vault. Regenerating to prevent X3DH lockout...');
+        const { generateX25519KeyPair } = await import('../utils/crypto');
+        const { authApi } = await import('../utils/axiosConfig');
+        const opks = [];
+        const opksPrivate = [];
+        for (let i = 0; i < 20; i++) {
+          const key = await generateX25519KeyPair();
+          opks.push({ publicKey: key.publicKeyBase64 });
+          opksPrivate.push(key);
+        }
+        for (let i = 0; i < opksPrivate.length; i++) {
+          await setKey(`opk_priv_${user.id}_${opks[i].publicKey}`, opksPrivate[i].privateKey, mKey);
+        }
+        await authApi.uploadOpks({ oneTimePreKeys: opks });
+        console.log('[RESTORE] OPKs successfully regenerated and uploaded to backend.');
+      }
+
+      // 6. Trigger Offline Message Sync (Background)
+      const { syncOfflineMessages } = await import('../utils/offlineSyncService');
+      syncOfflineMessages(mKey, user);
+
       completePassphraseRestore({ sign: ikSign, dh: ikDh }, mKey);
     } catch (err) {
       console.error('[RESTORE]', err);

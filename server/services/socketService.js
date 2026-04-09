@@ -103,7 +103,10 @@ module.exports = (io) => {
 
         socket.emit('newMessage', messageData);
         const recipientSocketId = userSockets.get(recipientId);
-        if (recipientSocketId) io.to(recipientSocketId).emit('newMessage', messageData);
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('newMessage', messageData);
+          await message.update({ deliveredAt: new Date() });
+        }
       } catch (error) {
         console.error('[socket] sendMessage error:', error);
       }
