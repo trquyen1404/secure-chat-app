@@ -16,6 +16,14 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  displayName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  bio: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
   publicKey: {
     type: DataTypes.TEXT,
     allowNull: false,
@@ -59,6 +67,10 @@ const User = sequelize.define('User', {
   vaultData: {
     type: DataTypes.TEXT('long'),
     allowNull: true,
+  },
+  vaultVersion: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1,
   },
 }, {
   timestamps: true,

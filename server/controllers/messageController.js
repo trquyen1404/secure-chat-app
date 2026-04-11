@@ -33,6 +33,7 @@ exports.getMessages = async (req, res) => {
     }
     const messages = await Message.findAll({
       where: whereClause,
+      attributes: ['id', 'senderId', 'recipientId', 'encryptedContent', 'ratchetKey', 'n', 'pn', 'iv', 'senderEk', 'usedOpk', 'type', 'localId', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit
     });

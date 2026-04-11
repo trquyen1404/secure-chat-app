@@ -9,7 +9,11 @@ const {
   unblockUser,
   getBlockedUsers,
   getProfile,
-  uploadOpks
+  uploadOpks,
+  updateProfile,
+  uploadAvatar,
+  uploadAvatarMiddleware,
+  clearPreKeys
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 
@@ -27,5 +31,9 @@ router.post('/block', auth, blockUser);
 router.post('/unblock', auth, unblockUser);
 router.get('/blocked', auth, getBlockedUsers);
 router.get('/profile', auth, getProfile);
+router.put('/profile', auth, updateProfile);
+router.post('/avatar', auth, uploadAvatarMiddleware, uploadAvatar);
+
+router.delete('/opks', auth, clearPreKeys);
 
 module.exports = router;

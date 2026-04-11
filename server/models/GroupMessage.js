@@ -45,6 +45,10 @@ const GroupMessage = sequelize.define('GroupMessage', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  signature: {
+    type: DataTypes.TEXT,
+    allowNull: true,  // [Fix] ECDSA signature over ciphertext+IV+AD for group message integrity
+  },
   replyToId: {
     type: DataTypes.UUID,
     allowNull: true,
@@ -72,6 +76,15 @@ const GroupMessage = sequelize.define('GroupMessage', {
   },
   editedBy: {
     type: DataTypes.UUID,
+    allowNull: true,
+  },
+  type: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'text',
+  },
+  localId: {
+    type: DataTypes.STRING,
     allowNull: true,
   },
 }, {

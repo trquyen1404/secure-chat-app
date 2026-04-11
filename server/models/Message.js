@@ -74,6 +74,15 @@ const Message = sequelize.define('Message', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  type: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'text',
+  },
+  localId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 }, {
   timestamps: true,
   indexes: [

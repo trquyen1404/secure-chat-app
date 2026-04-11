@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS "Users" (
     "lastSeenAt"         TIMESTAMP WITH TIME ZONE,
     "online"             BOOLEAN DEFAULT FALSE,
     "tokenVersion"       INTEGER DEFAULT 0,
+    "vaultVersion"       INTEGER DEFAULT 1,
+    "vaultData"          TEXT,
     "createdAt"          TIMESTAMP WITH TIME ZONE NOT NULL,
     "updatedAt"          TIMESTAMP WITH TIME ZONE NOT NULL
 );

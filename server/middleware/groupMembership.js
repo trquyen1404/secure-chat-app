@@ -8,7 +8,13 @@ const GroupMember = require('../models/GroupMember');
 const requireGroupMembership = async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    if (!groupId) return res.status(400).json({ error: 'groupId is required' });
+    if (!groupId || groupId === 'undefined') return res.status(400).json({ error: 'groupId is required' });
+
+    // Simple UUID check to prevent DB errors
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(groupId)) {
+      return res.status(400).json({ error: 'ID nhóm không hợp lệ' });
+    }
 
     const member = await GroupMember.findOne({
       where: { groupId, userId: req.userId },

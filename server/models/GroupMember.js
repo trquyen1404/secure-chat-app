@@ -19,6 +19,10 @@ const GroupMember = sequelize.define('GroupMember', {
     type: DataTypes.STRING,
     defaultValue: 'member',
   },
+  lastReadMessageId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 }, {
   timestamps: true,
   indexes: [

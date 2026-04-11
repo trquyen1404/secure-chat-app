@@ -6,7 +6,9 @@ import {
 } from '../utils/crypto';
 import { downloadAndRestoreVault } from '../utils/vaultSyncService';
 import { getKey } from '../utils/keyStore';
-import { ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { generateDeviceMasterKey, wrapVaultKey } from '../utils/crypto';
+import { saveDeviceMasterKey, saveLocalVaultVersion, loadLocalVaultVersion, saveWrappedVaultKey } from '../utils/localSecurityService';
+import { ShieldCheck, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
 const RestoreKeyModal = () => {
   const [passphrase, setPassphrase] = useState('');
@@ -17,6 +19,8 @@ const RestoreKeyModal = () => {
 
   const handleRestore = async (e) => {
     e.preventDefault();
+    const isVersionMismatch = await loadLocalVaultVersion() > 0 && await loadLocalVaultVersion() < (user.vaultVersion || 1);
+    
     if (passphrase.length < 8) {
       setError('Mật khẩu khôi phục phải có ít nhất 8 ký tự.');
       return;
@@ -99,10 +103,28 @@ const RestoreKeyModal = () => {
       const { syncOfflineMessages } = await import('../utils/offlineSyncService');
       syncOfflineMessages(mKey, user);
 
+      // 7. [Standard Industry Solution] Handle Passwordless Persistence (Wrapped Vault Key)
+      console.log('[RESTORE] Establishing Device-bound persistence...');
+      const deviceKey = await generateDeviceMasterKey();
+      const wrappedVault = await wrapVaultKey(mKey, deviceKey);
+      
+      await saveDeviceMasterKey(deviceKey);
+      await saveWrappedVaultKey(wrappedVault);
+      await saveLocalVaultVersion(user.vaultVersion || 1);
+
+      // 8. Re-persist Identity Keys using the recovered MasterKey 
+      // Note: We use the recovered mKey here to ensure KeyStore decryption works in future
+      await setKey(`ik_sign_priv_${user.id}`, ikSign, mKey);
+      await setKey(`ik_dh_priv_${user.id}`, ikDh, mKey);
+      await setKey(`spk_priv_${user.id}`, spkPriv, mKey);
+
+      console.log('[RESTORE] Device security initialized. Next refresh will be passwordless.');
+
       completePassphraseRestore({ sign: ikSign, dh: ikDh }, mKey);
     } catch (err) {
       console.error('[RESTORE]', err);
-      setError(err.message.includes('Decryption Failed') 
+      const isAuthError = err.name === 'OperationError' || err.message.includes('Decryption Failed');
+      setError(isAuthError
         ? 'Mật khẩu khôi phục không chính xác. Vui lòng thử lại.' 
         : 'Lỗi khôi phục: ' + err.message);
     } finally {
@@ -118,12 +140,17 @@ const RestoreKeyModal = () => {
       <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden transition-all duration-300">
         <div className="p-8">
           <div className="flex flex-col items-center mb-6">
-            <div className="w-14 h-14 bg-amber-500/10 rounded-full flex items-center justify-center mb-4 transition-colors">
-              <ShieldCheck className="w-8 h-8 text-amber-500" />
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-4 transition-colors ${user.vaultVersion > 1 ? 'bg-amber-500/10' : 'bg-blue-500/10'}`}>
+              {user.vaultVersion > 1 ? <RefreshCw className="w-8 h-8 text-amber-500 animate-spin-slow" /> : <ShieldCheck className="w-8 h-8 text-blue-500" />}
             </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-slate-100">Khôi phục Két sắt</h3>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-slate-100">
+              {user.vaultVersion > 1 ? 'Cập nhật Két sắt' : 'Khôi phục Két sắt'}
+            </h3>
             <p className="text-sm text-gray-500 dark:text-slate-400 text-center mt-2 px-4 transition-colors">
-              Thiết bị mới phát hiện. Vui lòng nhập mật khẩu khôi phục để dải mã tin nhắn của bạn.
+              {user.vaultVersion > 1 
+                ? "Mật khẩu của bạn đã được thay đổi từ một thiết bị khác. Vui lòng nhập mật khẩu mới để tiếp tục." 
+                : "Thiết bị mới phát hiện. Vui lòng nhập mật khẩu khôi phục để dải mã tin nhắn của bạn."
+              }
             </p>
           </div>
 

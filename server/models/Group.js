@@ -15,6 +15,10 @@ const Group = sequelize.define('Group', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  createdBy: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
 }, {
   timestamps: true,
 });

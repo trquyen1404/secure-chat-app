@@ -11,6 +11,9 @@ router.use(auth);
 // Create a new group (no membership check — creator is being added)
 router.post('/', validate(createGroupSchema), groupController.createGroup);
 
+// Get all groups the current user belongs to
+router.get('/', groupController.getUserGroups);
+
 // Get group info + members (must be a member)
 router.get('/:groupId', requireGroupMembership, groupController.getGroup);
 

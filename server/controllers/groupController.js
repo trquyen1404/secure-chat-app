@@ -23,7 +23,7 @@ exports.createGroup = async (req, res) => {
     }));
     await GroupMember.bulkCreate(memberRows);
 
-    res.status(201).json({ groupId: group.id, name: group.name, avatarUrl: group.avatarUrl });
+    res.status(201).json({ id: group.id, name: group.name, avatarUrl: group.avatarUrl });
   } catch (err) {
     console.error('createGroup error', err);
     res.status(500).json({ error: 'Failed to create group' });
@@ -61,6 +61,7 @@ exports.getGroupMessages = async (req, res) => {
 
     const messages = await GroupMessage.findAll({
       where: whereClause,
+      attributes: ['id', 'groupId', 'senderId', 'encryptedContent', 'ratchetKey', 'n', 'pn', 'iv', 'signature', 'type', 'localId', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit
     });
@@ -76,7 +77,7 @@ exports.getGroupMessages = async (req, res) => {
 exports.sendGroupMessage = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { encryptedContent, ratchetKey, n, pn, iv, replyToId } = req.body;
+    const { encryptedContent, ratchetKey, n, pn, iv, replyToId, signature, index } = req.body;
     const senderId = req.userId;
 
     const message = await GroupMessage.create({
@@ -84,9 +85,10 @@ exports.sendGroupMessage = async (req, res) => {
       senderId,
       encryptedContent,
       ratchetKey,
-      n,
+      n: (index !== undefined ? index : n) || 0,
       pn,
       iv,
+      signature: signature || null,
       replyToId: replyToId || null,
     });
 
@@ -100,6 +102,7 @@ exports.sendGroupMessage = async (req, res) => {
       pn,
       iv,
       replyToId: replyToId || null,
+      localId: message.localId,
       createdAt: message.createdAt,
     });
   } catch (err) {
@@ -139,3 +142,44 @@ exports.deleteGroupMessage = async (req, res) => {
   }
 };
 
+/** Get all groups the current user belongs to */
+exports.getUserGroups = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const groupMemberships = await GroupMember.findAll({
+      where: { userId },
+      attributes: ['lastReadMessageId'],
+      include: [{ 
+        model: Group, 
+        as: 'Group',
+        attributes: ['id', 'name', 'avatarUrl', 'createdBy', 'createdAt']
+      }]
+    });
+    
+    // Map memberships to include both Group data and membership metadata (lastReadMessageId)
+    const groups = await Promise.all(groupMemberships.map(async (m) => {
+      if (!m.Group) return null;
+      
+      // Fetch latest message for this group (excluding technical distribution messages)
+      const latestMessage = await GroupMessage.findOne({
+        where: { 
+          groupId: m.Group.id,
+          type: { [Op.notIn]: ['handshake_ack', 'SENDER_KEY_DISTRIBUTION', 'SESSION_DESYNC_ERROR'] }
+        },
+        order: [['createdAt', 'DESC']],
+        attributes: ['id', 'senderId', 'encryptedContent', 'createdAt', 'type']
+      });
+
+      return {
+        ...m.Group.get({ plain: true }),
+        lastReadMessageId: m.lastReadMessageId,
+        latestMessage: latestMessage || null
+      };
+    }));
+
+    res.json(groups.filter(g => g !== null));
+  } catch (err) {
+    console.error('[getUserGroups]', err);
+    res.status(500).json({ error: 'Failed to fetch user groups' });
+  }
+};

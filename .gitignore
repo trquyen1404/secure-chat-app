@@ -4,3 +4,4 @@ dist/
 build/
 .agents/
 log.txt
+docs

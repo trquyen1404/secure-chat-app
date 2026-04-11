@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Code2, Lock, FileText, Download, Headphones, Trash2, CornerUpLeft, Smile, Check, CheckCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessage }) => {
+const MessageBubble = ({ message, isMe, members, onDelete, onReact, onReply, repliedMessage }) => {
   const [showEncrypted, setShowEncrypted] = useState(false);
   const [showReactionsMenu, setShowReactionsMenu] = useState(false);
   const { user: currentUser } = useAuth();
@@ -60,6 +60,9 @@ const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessa
     );
   };
 
+  const resolvedName = members?.find(m => m.userId === message.senderId || m.id === message.senderId)?.User?.username;
+  const senderName = message.senderName || resolvedName || message.sender?.username || 'Đối tác';
+
   const reactionCounts = message.reactions || {};
   const hasReactions = Object.keys(reactionCounts).length > 0;
 
@@ -111,13 +114,15 @@ const MessageBubble = ({ message, isMe, onDelete, onReact, onReply, repliedMessa
 
         <div className={`relative px-4 py-3 rounded-[20px] shadow-sm text-sm shadow-black/10 transition-all min-w-[120px] ${
           isMe
-            ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-tr-sm self-end'
-            : 'bg-white dark:bg-slate-800 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700/50 rounded-tl-sm self-start shadow-sm'
+            ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-tr-sm self-end animate-slide-in-right'
+            : 'bg-white dark:bg-slate-800 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700/50 rounded-tl-sm self-start shadow-sm animate-slide-in-left'
         } ${message.isDeleted ? '!bg-transparent !bg-none border-2 border-dashed border-gray-300 dark:border-slate-600/50 text-gray-400 dark:text-slate-400 shadow-none' : ''}`}>
            {!message.isDeleted && (
              <div className="flex justify-between flex-wrap items-center gap-3 mb-1.5">
-               <span className={`font-medium text-[11px] opacity-70 uppercase tracking-wide flex items-center gap-1 ${isMe ? 'text-indigo-100' : 'text-slate-400'}`}>
-                  {isMe ? 'Bạn' : 'Đối tác'}
+               <span className={`font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 ${isMe ? 'text-indigo-100/80' : 'text-indigo-500 dark:text-indigo-400'}`}>
+                  {isMe ? 'Bạn' : (message.groupId ? senderName : 'Đối tác')}
+                  {message.groupId && !isMe && <span className="w-1 h-1 bg-current rounded-full opacity-50"></span>}
+                  {message.groupId && !isMe && <span className="text-[9px] opacity-60 font-medium lowercase">thông qua nhóm</span>}
                </span>
                <button 
                  type="button"

@@ -9,14 +9,16 @@
 
 // Helper for deterministic Associated Data (AD) strings based on participant IDs
 export function getAssociatedData(id01, id02) {
-  // Ensure we have strings and sort them to guarantee order-independence
-  const id1 = String(id01 || '');
-  const id2 = String(id02 || '');
-  const ids = [id1, id2].sort();
-  const ad = ids.join(':'); // Use colon as a distinct separator to avoid UUID hyphen confusion
+  const id1 = String(id01 || '').trim();
+  const id2 = String(id02 || '').trim();
+  if (!id1 || !id2) return 'STATIC_AD_FALLBACK';
   
-  if (id1 !== id2) {
-    console.log(`[E2EE-AD] Generating AD for ${id1.slice(0,8)}... and ${id2.slice(0,8)}... -> "${ad}"`);
+  const ids = [id1, id2].sort();
+  const ad = ids.join(':');
+  
+  // Trace only if IDs are valid to avoid log spam during loading
+  if (id1 && id2 && id1 !== id2) {
+    console.debug(`[CRYPTO-Audit] AD generated: "${ad}"`);
   }
   return ad;
 }
@@ -38,7 +40,11 @@ export function arrayBufferToBase64(buffer) {
 }
 
 export function base64ToArrayBuffer(base64) {
-  const binaryString = window.atob(base64);
+  // [Fix] Normalize unpadded Base64 (e.g., from Signal-style encoding) before decoding.
+  // atob() requires the string length to be a multiple of 4.
+  let padded = (base64 || '').replace(/-/g, '+').replace(/_/g, '/');
+  while (padded.length % 4 !== 0) padded += '=';
+  const binaryString = window.atob(padded);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
@@ -126,17 +132,19 @@ export async function exportX25519Base64(publicKey) {
 // ── HKDF (HMAC-based Key Derivation Function) ────────────────────────────────
 
 export async function hkdfDerive(masterSecret, salt, info, length = 256) {
-  // [Fix] Explicitly wrap inputs in Uint8Array for browser-agnostic deterministic derivation
-  const rawMaster = new Uint8Array(masterSecret);
+  // [Fix] Handle both ArrayBuffer/Uint8Array AND pre-imported CryptoKey as input
+  let keyMaterial;
+  if (masterSecret instanceof CryptoKey) {
+    // Already a CryptoKey — use directly as keyMaterial, but HKDF needs it re-imported
+    const rawBytes = await window.crypto.subtle.exportKey('raw', masterSecret);
+    keyMaterial = await window.crypto.subtle.importKey('raw', rawBytes, { name: 'HKDF' }, false, ['deriveKey']);
+  } else {
+    // ArrayBuffer, Uint8Array, or similar — wrap in Uint8Array
+    const rawMaster = new Uint8Array(masterSecret);
+    keyMaterial = await window.crypto.subtle.importKey('raw', rawMaster, { name: 'HKDF' }, false, ['deriveKey']);
+  }
+
   const rawSalt = salt ? new Uint8Array(salt) : new Uint8Array(32);
-  
-  const keyMaterial = await window.crypto.subtle.importKey(
-    'raw',
-    rawMaster,
-    { name: 'HKDF' },
-    false,
-    ['deriveKey']
-  );
 
   const key = await window.crypto.subtle.deriveKey(
     {
@@ -191,15 +199,16 @@ export async function x3dhInitiatorHandshake(
   }
 
   const combinedSecret = concatUint8Arrays(...secrets);
-  console.log(`[X3DH-Audit] Combined Secret (Raw) FP: ${await getFingerprint(combinedSecret.buffer)}`);
+  const secretFP = await getFingerprint(combinedSecret.buffer);
   
   const rootKey = await hkdfDerive(combinedSecret, null, 'ROOT_KEY_V5');
   const rawRoot = await window.crypto.subtle.exportKey('raw', rootKey);
+  const rootFP = await getFingerprint(rawRoot);
   
   const sendChainKey = await hkdfDerive(rawRoot, null, 'SENDER_CHAIN_V1');
   const recvChainKey = await hkdfDerive(rawRoot, null, 'RECEIVER_CHAIN_V1');
 
-  console.log(`[X3DH-Init] FINAL ROOT FP: ${await getFingerprint(rawRoot)}`);
+  console.log(`[X3DH-Init] Handshake Derived: Secret_FP=${secretFP}, Root_FP=${rootFP}`);
   return { rootKey, sendChainKey, recvChainKey };
 }
 
@@ -227,15 +236,16 @@ export async function x3dhResponderHandshake(
   }
 
   const combinedSecret = concatUint8Arrays(...secrets);
-  console.log(`[X3DH-Audit] Combined Secret (Raw) FP: ${await getFingerprint(combinedSecret.buffer)}`);
+  const secretFP = await getFingerprint(combinedSecret.buffer);
   
   const rootKey = await hkdfDerive(combinedSecret, null, 'ROOT_KEY_V5');
   const rawRoot = await window.crypto.subtle.exportKey('raw', rootKey);
+  const rootFP = await getFingerprint(rawRoot);
   
   const sendChainKey = await hkdfDerive(rawRoot, null, 'RECEIVER_CHAIN_V1');
   const recvChainKey = await hkdfDerive(rawRoot, null, 'SENDER_CHAIN_V1');
 
-  console.log(`[X3DH-Resp] FINAL ROOT FP: ${await getFingerprint(rawRoot)}`);
+  console.log(`[X3DH-Resp] Handshake Derived: Secret_FP=${secretFP}, Root_FP=${rootFP}`);
   return { rootKey, sendChainKey, recvChainKey };
 }
 
@@ -468,6 +478,9 @@ export async function serializeSession(session) {
     if (key instanceof CryptoKey) {
       const jwk = await window.crypto.subtle.exportKey('jwk', key);
       targetObj[keyName] = { _isJWK: true, jwk };
+    } else if (key && key._isJWK) {
+      // [Defensive] If it's already a JWK wrapper, preserve it
+      targetObj[keyName] = key;
     }
   };
 
@@ -587,9 +600,15 @@ export async function deserializeSession(serialized) {
   if (serialized.skippedMessageKeys) {
     const deserializedSkipped = {};
     for (const [idx, data] of Object.entries(serialized.skippedMessageKeys)) {
-      if (data?._isJWK) {
+      if (data instanceof CryptoKey) {
+        deserializedSkipped[idx] = data;
+      } else if (data?._isJWK) {
         importPromises.push((async () => {
-          deserializedSkipped[idx] = await importKeyFromJWK(data.jwk, aesAlg, aesUsages);
+          try {
+            deserializedSkipped[idx] = await importKeyFromJWK(data.jwk, aesAlg, aesUsages);
+          } catch (e) {
+            console.warn(`[E2EE-Deserialization] Failed to import skipped key at ${idx}`, e);
+          }
         })());
       }
     }
@@ -599,12 +618,68 @@ export async function deserializeSession(serialized) {
   await Promise.all(importPromises);
   
   // Validation Audit
+  const missingKeys = [];
+  if (!(session.rootKey instanceof CryptoKey)) missingKeys.push('rootKey');
+  if (!(session.sendChainKey instanceof CryptoKey)) missingKeys.push('sendChainKey');
+  if (!(session.recvChainKey instanceof CryptoKey)) missingKeys.push('recvChainKey');
+
+  if (missingKeys.length > 0) {
+    console.warn(`[E2EE-Deserialization] Session restored with MISSING/INVALID CryptoKeys: ${missingKeys.join(', ')}`);
+  }
+
   if (session.nextRecvIndex === undefined) {
     console.error('[E2EE-Deserialization] CRITICAL ERROR: nextRecvIndex is UNDEFINED after recovery.');
     console.debug('[E2EE-Deserialization] Serialized object keys:', Object.keys(serialized));
   } else {
-    console.log(`[E2EE-Deserialization] session restored. nextRecvIndex: ${session.nextRecvIndex}`);
+    console.log(`[E2EE-Deserialization] session restored. nextRecvIndex: ${session.nextRecvIndex}, keys: ${missingKeys.length === 0 ? 'OK' : 'PARTIAL'}`);
   }
 
   return session;
+}/**
+ * Generates a non-extractable 256-bit AES-GCM Device Master Key.
+ * This key is intended to stay on the device for passwordless E2EE.
+ */
+export async function generateDeviceMasterKey() {
+  return window.crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    false, // extractable: false (CRITICAL FOR UX/SECURITY)
+    ['encrypt', 'decrypt']
+  );
+}
+
+/**
+ * Wraps (encrypts) the extractable Vault Key using a non-extractable Device Key.
+ */
+export async function wrapVaultKey(vaultKey, deviceKey) {
+  const rawVaultKey = await window.crypto.subtle.exportKey('raw', vaultKey);
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    deviceKey,
+    rawVaultKey
+  );
+  return {
+    wrappedKeyB64: arrayBufferToBase64(encrypted),
+    ivB64: arrayBufferToBase64(iv)
+  };
+}
+
+/**
+ * Unwraps (decrypts) the Vault Key using the Device Key.
+ */
+export async function unwrapVaultKey(wrappedB64, ivB64, deviceKey) {
+  const encrypted = base64ToArrayBuffer(wrappedB64);
+  const iv = base64ToArrayBuffer(ivB64);
+  const decrypted = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    deviceKey,
+    encrypted
+  );
+  return window.crypto.subtle.importKey(
+    'raw',
+    decrypted,
+    { name: 'AES-GCM', length: 256 },
+    true, // extractable: true (so it can be used for vault sync and further wrapping)
+    ['encrypt', 'decrypt']
+  );
 }

@@ -46,6 +46,7 @@ export function closeRatchetDB() {
  * Saves a session state. Encrypts if masterKey is provided.
  */
 export async function saveSession(userId, state, masterKey = null) {
+  if (!userId) return;
   const db = await initRatchetDB();
   let dataToSave = { userId, ...state };
 
@@ -72,6 +73,7 @@ export async function saveSession(userId, state, masterKey = null) {
  * Loads a session state. Decrypts if masterKey is provided.
  */
 export async function loadSession(userId, masterKey = null) {
+  if (!userId) return null;
   const db = await initRatchetDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_SESSIONS, 'readonly');
@@ -81,11 +83,16 @@ export async function loadSession(userId, masterKey = null) {
       const result = request.result;
       if (!result) return resolve(null);
 
-      if (result.encrypted && masterKey) {
+      if (result.encrypted) {
+        if (!masterKey) {
+          console.warn(`[STORE] Attempted to load encrypted session for ${userId} without masterKey. Returning null to avoid logic corruption.`);
+          return resolve(null);
+        }
         try {
           const decrypted = await decryptData(result.encrypted.ciphertextB64, result.encrypted.ivB64, masterKey);
           const serialized = JSON.parse(decrypted);
           // [Fix] Restore CryptoKeys from JWK
+          console.debug(`[STORE] Restoring session for ${userId} (restoration starting)...`);
           const session = await deserializeSession(serialized);
           resolve({ userId, ...session });
         } catch (e) {
@@ -93,6 +100,7 @@ export async function loadSession(userId, masterKey = null) {
           resolve(null);
         }
       } else {
+        console.debug(`[STORE] Loaded unencrypted/legacy session for ${userId}.`);
         resolve(result);
       }
     };
@@ -104,6 +112,7 @@ export async function loadSession(userId, masterKey = null) {
  * Saves a decrypted message. Encrypts content if masterKey is provided.
  */
 export async function saveDecryptedMessage(id, contentOrObj, masterKey = null) {
+  if (!id) return;
   const db = await initRatchetDB();
   
   // Handle both legacy (just content string) and modern (metadata object) calls
@@ -130,6 +139,24 @@ export async function saveDecryptedMessage(id, contentOrObj, masterKey = null) {
     store.put(dataToSave);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ * Deletes a specific session. Used for self-healing resets.
+ */
+export async function deleteSession(userId) {
+  if (!userId) return;
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_SESSIONS, 'readwrite');
+    const store = transaction.objectStore(STORE_SESSIONS);
+    const request = store.delete(userId);
+    request.onsuccess = () => {
+      console.log(`[STORE] Session for ${userId} deleted.`);
+      resolve();
+    };
+    request.onerror = () => reject(request.error);
   });
 }
 
@@ -187,6 +214,7 @@ export async function bulkSaveMessages(messages, masterKey = null, onProgress = 
 }
 
 export async function getDecryptedMessage(id, masterKey = null) {
+  if (!id) return null;
   const db = await initRatchetDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_MESSAGES, 'readonly');
