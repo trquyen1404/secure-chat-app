@@ -298,7 +298,13 @@ export async function unwrapIdentityBundleWithPIN(wrappedKeyB64, saltB64, ivB64,
   const iv = base64ToArrayBuffer(ivB64);
 
   const aesKey = await pbkdf2Derive(pin, new Uint8Array(salt));
-  const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, aesKey, ciphertext);
+  let decrypted;
+  try {
+    decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, aesKey, ciphertext);
+  } catch (err) {
+    console.error('[CRYPTO] unwrapIdentityBundleWithPIN decryption failed. Likely incorrect PIN.');
+    throw err;
+  }
 
   const bundle = JSON.parse(new TextDecoder().decode(decrypted));
 

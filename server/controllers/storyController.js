@@ -44,7 +44,7 @@ exports.getStories = async (req, res) => {
       include: [{
         model: User,
         as: 'Author',
-        attributes: ['id', 'username', 'avatar']
+        attributes: ['id', 'username', 'avatarUrl']
       }],
       order: [['createdAt', 'DESC']]
     });

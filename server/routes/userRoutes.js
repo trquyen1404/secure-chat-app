@@ -5,9 +5,13 @@ const authenticateToken = require('../middleware/auth');
 // const upload = require('../middleware/upload');
 
 // Private routes (Cần token)
+router.get('/', authenticateToken, userController.getUsers);
 router.get('/me', authenticateToken, userController.getMe);
 router.get('/contacts', authenticateToken, userController.getContacts);
 router.get('/search', authenticateToken, userController.searchUsers);
+router.get('/pins', authenticateToken, userController.getPins);
+router.post('/pin', authenticateToken, userController.pinChat);
+router.delete('/unpin/:targetUserId', authenticateToken, userController.unpinChat);
 router.get('/:id', authenticateToken, userController.getUserProfile);
 
 // Routes phục vụ X3DH Handshake

@@ -63,7 +63,7 @@ const RestoreKeyModal = () => {
         opksPrivate.push(key);
       }
 
-      await api.post('/api/users/prekeys', {
+      await api.post('/api/users/update-prekeys', {
         signedPreKey: {
           publicKey: spk.publicKeyBase64,
           signature: spkSignature
@@ -80,8 +80,14 @@ const RestoreKeyModal = () => {
       // We pass both keys to context or just complete
       await completePinRestore({ sign: restoredSignKey, dh: restoredDhKey });
     } catch (err) {
-      console.error(err);
-      setError('Incorrect PIN or corrupted backup data.');
+      console.error('[RestoreKeyModal] Error:', err);
+      if (err.response?.status === 404) {
+        setError('Lỗi hệ thống: Không tìm thấy máy chủ cập nhật khóa.');
+      } else if (err.message === 'Backup data missing or corrupted.') {
+        setError('Dữ liệu sao lưu trên máy chủ bị lỗi.');
+      } else {
+        setError('Mã PIN không chính xác hoặc dữ liệu sao lưu bị hỏng.');
+      }
     } finally {
       setLoading(false);
     }

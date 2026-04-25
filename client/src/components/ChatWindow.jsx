@@ -96,8 +96,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
 
         if (!bundle || !bundle.signedPreKey) throw new Error('Failed to fetch peer bundle');
 
-        const username = currentUser.username;
-        const ikDh_priv = await getKey(`ik_dh_priv_${username}`);
+        const ikDh_priv = await getKey(`ik_dh_priv_${currentUser.id}`);
         if (!ikDh_priv) throw new Error('Identity Key not found.');
 
         const ek = await generateX25519KeyPair();
@@ -146,10 +145,9 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
       const shouldAdopt = msg.senderEk && (!session || session.status === 'INITIALIZING') && isRemoteHigher;
 
       if (shouldAdopt) {
-        const username = currentUser.username;
-        const bobSPK_priv = await getKey(`spk_priv_${username}`);
-        const bobIKdh_priv = await getKey(`ik_dh_priv_${username}`);
-        const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${username}_${msg.usedOpk}`) : null;
+        const bobSPK_priv = await getKey(`spk_priv_${currentUser.id}`);
+        const bobIKdh_priv = await getKey(`ik_dh_priv_${currentUser.id}`);
+        const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${currentUser.id}_${msg.usedOpk}`) : null;
 
         const { rootKey, sendChainKey, recvChainKey } = await x3dhResponderHandshake(
           bobSPK_priv, bobIKdh_priv, bobOPK_priv,
@@ -284,9 +282,86 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
     }
   };
 
+  // -- Socket Event Listeners --
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = async (msg) => {
+      console.log('[Socket] Incoming newMessage:', msg);
+      // Kiểm tra xem tin nhắn có thuộc về cuộc hội thoại này không
+      const isRelevant = 
+        (msg.senderId === chatUser.id && msg.recipientId === currentUser.id) ||
+        (msg.senderId === currentUser.id && msg.recipientId === chatUser.id);
+      
+      console.log('[Socket] isRelevant:', isRelevant, 'chatUser.id:', chatUser.id, 'currentUser.id:', currentUser.id);
+      
+      if (isRelevant) {
+        // Nếu là tin nhắn của chính mình vừa gửi xong (đã có localId)
+        if (msg.senderId === currentUser.id && msg.localId) {
+          setMessages(prev => prev.map(m => 
+            (m.id === msg.localId || m.id === msg.id) 
+              ? { ...msg, decryptedContent: m.decryptedContent, status: 'sent' } 
+              : m
+          ));
+          return;
+        }
+
+        // Giải mã tin nhắn mới đến
+        const decryptedContent = await decryptRatchet(msg);
+        setMessages(prev => {
+          if (prev.find(m => m.id === msg.id)) return prev;
+          return [...prev, { ...msg, decryptedContent }];
+        });
+
+        // Tự động cuộn xuống
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+
+        // Đánh dấu đã xem
+        if (msg.senderId === chatUser.id) {
+           socket.emit('markAsRead', { senderId: chatUser.id });
+        }
+      }
+    };
+
+    const handleMessageDeleted = ({ messageId }) => {
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, isDeleted: true, decryptedContent: '[Tin nhắn đã bị thu hồi]' } : m));
+    };
+
+    const handleMessageReacted = ({ messageId, reactions }) => {
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
+    };
+
+    const handleTyping = ({ senderId }) => {
+      if (senderId === chatUser.id) setIsTyping(true);
+    };
+
+    const handleStopTyping = ({ senderId }) => {
+      if (senderId === chatUser.id) setIsTyping(false);
+    };
+
+    socket.on('newMessage', handleNewMessage);
+    socket.on('messageDeleted', handleMessageDeleted);
+    socket.on('messageReacted', handleMessageReacted);
+    socket.on('typing', handleTyping);
+    socket.on('stopTyping', handleStopTyping);
+
+    return () => {
+      socket.off('newMessage', handleNewMessage);
+      socket.off('messageDeleted', handleMessageDeleted);
+      socket.off('messageReacted', handleMessageReacted);
+      socket.off('typing', handleTyping);
+      socket.off('stopTyping', handleStopTyping);
+    };
+  }, [socket, chatUser.id, currentUser.id]);
+
   useEffect(() => {
     if (chatUser.id) {
-      getOrInitSession(chatUser.id).then(() => loadMessages());
+      // Đảm bảo luôn tải tin nhắn kể cả khi khởi tạo session gặp lỗi (để hiện lỗi giải mã thay vì trắng tinh)
+      getOrInitSession(chatUser.id)
+        .then(() => loadMessages())
+        .catch(() => loadMessages());
     }
   }, [chatUser.id]);
 

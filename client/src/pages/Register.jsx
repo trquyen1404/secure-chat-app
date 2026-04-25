@@ -139,15 +139,14 @@ const Register = () => {
       });
 
       const userId = res.data.user.id;
-
+      
       // 4. Save to IndexedDB (Only after server success)
-      const lowerUsername = username.toLowerCase();
-      await setKey(`ik_sign_priv_${lowerUsername}`, ikSign.privateKey);
-      await setKey(`ik_dh_priv_${lowerUsername}`, ikDh.privateKey);
-      await setKey(`spk_priv_${lowerUsername}`, spk.privateKey);
+      await setKey(`ik_sign_priv_${userId}`, ikSign.privateKey);
+      await setKey(`ik_dh_priv_${userId}`, ikDh.privateKey);
+      await setKey(`spk_priv_${userId}`, spk.privateKey);
 
       for (let i = 0; i < opksPrivate.length; i++) {
-        await setKey(`opk_priv_${lowerUsername}_${opks[i].publicKey}`, opksPrivate[i].privateKey);
+        await setKey(`opk_priv_${userId}_${opks[i].publicKey}`, opksPrivate[i].privateKey);
       }
 
       // Mark this device as having an initialized identity

@@ -47,7 +47,12 @@ module.exports = (io) => {
 
   io.on('connection', async (socket) => {
     userSockets.set(socket.userId, socket.id);
-    socket.join(`user:${socket.userId}`);
+    const roomName = `user:${socket.userId}`;
+    socket.join(roomName);
+    console.log(`[Socket] User ${socket.userId} connected (Socket ID: ${socket.id}) and joined room ${roomName}`);
+
+    // Log all rooms for this socket to verify
+    // console.log(`[Socket] Rooms for ${socket.id}:`, Array.from(socket.rooms));
 
     // Cập nhật trạng thái Online
     await User.update({ online: true }, { where: { id: socket.userId } });
@@ -101,14 +106,14 @@ module.exports = (io) => {
           createdAt: message.createdAt,
         };
 
-        // Gửi cho người gửi (để cập nhật trạng thái đã gửi) và người nhận
-        socket.emit('newMessage', messageData);
-        const recipientSocketId = userSockets.get(recipientId);
+        // Gửi cho người gửi (tất cả các tab) và người nhận (tất cả các tab)
+        console.log(`[Socket] Broadcasting newMessage to user:${socket.userId} and user:${recipientId}`);
+        io.to(`user:${socket.userId}`).emit('newMessage', messageData);
+        io.to(`user:${recipientId}`).emit('newMessage', messageData);
 
-        if (recipientSocketId) {
-          io.to(recipientSocketId).emit('newMessage', messageData);
-        } else {
-          // Gửi Push Notification nếu người nhận offline
+        // Gửi Push Notification nếu người nhận offline
+        const recipientActive = userSockets.has(recipientId);
+        if (!recipientActive) {
           try {
             const recipient = await User.findByPk(recipientId);
             if (recipient && recipient.webPushSubscription) {
