@@ -110,8 +110,13 @@ exports.register = async (req, res) => {
       token 
     });
   } catch (error) {
-    console.error('[register]', error);
-    res.status(500).json({ error: 'Registration failed' });
+    console.error('[register] ERROR DETAILS:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      errors: error.errors // Sequelize validation errors
+    });
+    res.status(500).json({ error: 'Registration failed: ' + error.message });
   }
 };
 

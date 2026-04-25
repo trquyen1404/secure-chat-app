@@ -307,3 +307,105 @@ export async function unwrapIdentityBundleWithPIN(wrappedKeyB64, saltB64, ivB64,
     pkcs8Dh: base64ToArrayBuffer(bundle.dh)
   };
 }
+
+// ── Benchmark / Legacy Support Functions ─────────────────────────────────────
+
+export async function generateRSAKeyPair() {
+  const keyPair = await window.crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: 4096,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["encrypt", "decrypt"]
+  );
+
+  const publicKeyExport = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
+  const publicKeyPem = arrayBufferToBase64(publicKeyExport);
+
+  return { publicKey: keyPair.publicKey, privateKey: keyPair.privateKey, publicKeyPem };
+}
+
+export async function generateAESKey() {
+  return window.crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptMessageAES(plaintext, key) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+  const ciphertext = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+  return { ciphertextB64: arrayBufferToBase64(ciphertext), ivB64: arrayBufferToBase64(iv) };
+}
+
+export async function decryptMessageAES(ciphertextB64, key, ivB64) {
+  const ciphertext = base64ToArrayBuffer(ciphertextB64);
+  const iv = base64ToArrayBuffer(ivB64);
+  const decrypted = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+
+export async function encryptKeyRSA(aesKey, publicKeyPem) {
+  const publicKeyBuffer = base64ToArrayBuffer(publicKeyPem);
+  const publicKey = await window.crypto.subtle.importKey(
+    "spki",
+    publicKeyBuffer,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    true,
+    ["encrypt"]
+  );
+
+  const rawAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
+  const wrappedKey = await window.crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, rawAesKey);
+  return arrayBufferToBase64(wrappedKey);
+}
+
+export async function decryptKeyRSA(wrappedKeyB64, privateKey) {
+  const wrappedKeyBuffer = base64ToArrayBuffer(wrappedKeyB64);
+  const rawAesKey = await window.crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, wrappedKeyBuffer);
+  
+  return window.crypto.subtle.importKey(
+    "raw",
+    rawAesKey,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function generateECDHKeyPair(curve = 'P-384') {
+  const keyPair = await window.crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: curve },
+    true,
+    ["deriveKey", "deriveBits"]
+  );
+
+  const publicKeyExport = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
+  const ecPublicKeyPem = arrayBufferToBase64(publicKeyExport);
+
+  return { ecPublicKey: keyPair.publicKey, ecPrivateKey: keyPair.privateKey, ecPublicKeyPem };
+}
+
+export async function deriveSharedAESKey(privateKey, otherPublicKeyPem, curve = 'P-384') {
+  const otherPublicKeyBuffer = base64ToArrayBuffer(otherPublicKeyPem);
+  const otherPublicKey = await window.crypto.subtle.importKey(
+    "spki",
+    otherPublicKeyBuffer,
+    { name: "ECDH", namedCurve: curve },
+    true,
+    []
+  );
+
+  return window.crypto.subtle.deriveKey(
+    { name: "ECDH", public: otherPublicKey },
+    privateKey,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}

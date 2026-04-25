@@ -4,6 +4,10 @@ import { useAuth } from './context/AuthContext';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import ChatApp from './pages/ChatApp';
+import BenchmarkMode from './pages/BenchmarkMode';
+
+import { clearRatchetDB } from './utils/ratchetStore';
+import { clearKeyStore } from './utils/keyStore';
 
 import RestoreKeyModal from './components/RestoreKeyModal';
 

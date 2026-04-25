@@ -5,6 +5,20 @@ const PinnedChat = require('../models/PinnedChat');
 const Friendship = require('../models/Friendship');
 const Message = require('../models/Message');
 
+// ── User Identity & Profile ─────────────────────────────────────────────────
+
+exports.getMe = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId, {
+      attributes: ['id', 'username', 'avatarUrl', 'themeColor', 'online', 'fullName', 'bio', 'phoneNumber', 'profilePrivacy', 'publicKey', 'dhPublicKey', 'encryptedPrivateKey', 'keyBackupSalt', 'keyBackupIv']
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch your profile' });
+  }
+};
+
 // ── X3DH PreKey Management ──────────────────────────────────────────────────
 
 exports.getPreKeyBundle = async (req, res) => {
@@ -73,6 +87,8 @@ exports.uploadPreKeys = async (req, res) => {
   }
 };
 
+exports.updatePreKeys = exports.uploadPreKeys;
+
 // ── User Listing & Status ────────────────────────────────────────────────────
 
 async function getContactIds(userId) {
@@ -98,6 +114,26 @@ exports.getUsers = async (req, res) => {
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+};
+
+exports.getContacts = exports.getUsers;
+
+exports.searchUsers = async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    const users = await User.findAll({
+      where: {
+        username: { [Op.iLike]: `%${q}%` },
+        id: { [Op.ne]: req.userId }
+      },
+      attributes: ['id', 'username', 'avatarUrl', 'online', 'themeColor'],
+      limit: 20
+    });
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Search failed' });
   }
 };
 
@@ -145,6 +181,16 @@ exports.updateProfile = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+};
+
+exports.updatePushSubscription = async (req, res) => {
+  try {
+    const subscription = req.body;
+    await User.update({ webPushSubscription: subscription }, { where: { id: req.userId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update push subscription' });
   }
 };
 
@@ -196,6 +242,8 @@ exports.getProfile = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 };
+
+exports.getUserProfile = exports.getProfile;
 
 // ── Pinned Chats ─────────────────────────────────────────────────────────────
 
