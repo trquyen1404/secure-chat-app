@@ -36,14 +36,37 @@ import { getKey } from '../utils/keyStore';
 import { saveMySenderKey, loadMySenderKey, saveTheirSenderKey, loadTheirSenderKey } from '../utils/senderKeyStore';
 import MessageBubble from './MessageBubble';
 import {
-  Send, Lock, Loader2, ArrowLeft, ShieldCheck,
-  ImagePlus, Paperclip, Mic, MicOff, Disc2, Trash2,
-  Phone, Video, CornerUpLeft, X
+  Phone, Video, CornerUpLeft, X, Info, ChevronRight, ChevronDown, User, Bell, Search, PlusCircle, Sticker, Gift as GifIcon, Smile, ThumbsUp, Pin, Settings, Type, Image, FileText, BellOff, MessageCircle, Clock, Eye, Shield, Ban, UserMinus, AlertCircle, Loader2, ImagePlus, Send
 } from 'lucide-react';
 
 const globalAutoInitRegistry = new Set();
 
-const ChatWindow = ({ user: chatUser, onClose }) => {
+const DetailSection = ({ title, isOpen, onToggle, children }) => (
+  <div className="w-full">
+    <button 
+      onClick={onToggle}
+      className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-[var(--hover)] transition-colors group"
+    >
+      <span className="text-sm font-semibold text-[var(--text-primary)]">{title}</span>
+      {isOpen ? <ChevronDown className="w-4 h-4 text-[var(--text-secondary)]" /> : <ChevronRight className="w-4 h-4 text-[var(--text-secondary)]" />}
+    </button>
+    {isOpen && <div className="mt-1 space-y-1">{children}</div>}
+  </div>
+);
+
+const DetailAction = ({ icon, label, subLabel }) => (
+  <button className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--hover)] transition-colors text-left group">
+    <div className="w-8 h-8 shrink-0 flex items-center justify-center text-[var(--text-primary)]">
+      {icon}
+    </div>
+    <div className="flex-1 min-w-0">
+      <p className="text-[14px] font-medium text-[var(--text-primary)] truncate">{label}</p>
+      {subLabel && <p className="text-[11px] text-[var(--text-secondary)] truncate">{subLabel}</p>}
+    </div>
+  </button>
+);
+
+const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -58,6 +81,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const messagesEndRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const typingTimeout = useRef(null);
+  const [replyingTo, setReplyingTo] = useState(null);
   const fileInputRef = useRef(null);
   const docInputRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -65,6 +89,16 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   const audioChunksRef = useRef([]);
   const lastTypingEmitRef = useRef(0);
   const isOnline = onlineUsers.has(chatUser.id) || chatUser.online;
+  const [openSections, setOpenSections] = useState({
+    info: true,
+    custom: true,
+    media: true,
+    privacy: true
+  });
+
+  const toggleSection = (section) => {
+    setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -198,8 +232,11 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           if (success && content && (msg.type === 'text' || !msg.type)) {
             const targetMatch = chatUser.isGroup ? msg.groupId === chatUser.id : msg.senderId === chatUser.id;
             if (targetMatch) {
+              const member = chatUser.isGroup 
+                ? groupMetadata?.members?.find(m => m.userId === msg.senderId || m.id === msg.senderId)
+                : null;
               const senderName = chatUser.isGroup 
-                ? groupMetadata?.members?.find(m => m.userId === msg.senderId || m.id === msg.senderId)?.User?.username
+                ? (member?.User?.username || member?.username || 'Người dùng')
                 : chatUser.username;
 
               setMessages(prev => {
@@ -273,7 +310,8 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
               return;
             }
 
-            const senderName = groupMetadata?.members?.find(m => m.userId === msg.senderId || m.id === msg.senderId)?.User?.username;
+            const member = groupMetadata?.members?.find(m => m.userId === msg.senderId || m.id === msg.senderId);
+            const senderName = member?.User?.username || member?.username || 'Người dùng';
             const isGhostContent = (!content && !msg.senderEk)
               || (msg.type === 'handshake_ack' || msg.type === 'SENDER_KEY_DISTRIBUTION');
 
@@ -569,7 +607,8 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
           }
         }
 
-        const senderName = groupMetadata?.members?.find(m => m.userId === msg.senderId || m.id === msg.senderId)?.User?.username;
+        const member = groupMetadata?.members?.find(m => m.userId === msg.senderId || m.id === msg.senderId);
+        const senderName = member?.User?.username || member?.username || 'Người dùng';
 
         const isErrorContent = (!content || typeof content !== 'string' || content.trim() === '') && msg.senderId !== currentUser.id;
         const isGhostContent = (msg.type === 'handshake_ack' || msg.type === 'SENDER_KEY_DISTRIBUTION') && msg.senderId !== currentUser.id;
@@ -688,7 +727,7 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
         getOrInitSession(chatUser.id).then(() => loadMessages()).catch(console.error);
       }
     }
-  }, [chatUser?.id, token, currentUser.id]);
+  }, [chatUser?.id, token, currentUser?.id]);
 
   const fetchGroupMetadata = async () => {
     if (!chatUser?.id) return;
@@ -1422,162 +1461,260 @@ const ChatWindow = ({ user: chatUser, onClose }) => {
   }, [chatUser.id]);
 
   return (
-    <div key={chatUser.id} className="flex-1 flex flex-col bg-white dark:bg-slate-900 border-l border-gray-200 dark:border-slate-800 relative z-10 w-full transition-colors duration-300">
-      <div className="absolute inset-0 dark:bg-gradient-to-b dark:from-slate-900 dark:via-slate-900/90 dark:to-slate-950 pointer-events-none"></div>
-
-      {/* Header */}
-      <div className="h-[72px] px-6 flex items-center justify-between border-b border-gray-200 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shrink-0 sticky top-0 z-20 shadow-sm">
-        <div className="flex items-center gap-4">
-          <button onClick={onClose} className="p-2 -ml-2 text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition md:hidden">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="relative">
-            <div className="w-11 h-11 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex justify-center items-center text-white font-bold text-lg shadow-lg shadow-purple-500/20">
-              {(chatUser.name || chatUser.username || '?').charAt(0).toUpperCase()}
+    <div className="flex-1 flex overflow-hidden bg-[var(--bg-primary)] h-full">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0 border-r border-[var(--border)]">
+        {/* Header */}
+        <div className="h-16 px-4 flex items-center justify-between bg-[var(--bg-primary)]/80 backdrop-blur-md border-b border-[var(--border)] z-20">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+               <div className="w-10 h-10 rounded-full bg-[var(--hover)] flex items-center justify-center overflow-hidden border border-[var(--border)]">
+                  {chatUser.avatarUrl ? (
+                    <img src={chatUser.avatarUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-sm font-bold text-[var(--text-secondary)]">
+                      {(chatUser.displayName || chatUser.username || chatUser.name || '?').charAt(0).toUpperCase()}
+                    </span>
+                  )}
+               </div>
+               {isOnline && (
+                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-[#31a24c] rounded-full border-2 border-[var(--bg-primary)]"></div>
+               )}
             </div>
-            {isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-[2.5px] border-white dark:border-slate-900 rounded-full" />}
-          </div>
-          <div>
-            <h2 className="font-semibold text-gray-800 dark:text-slate-100 text-[15px]">
-              {chatUser.isGroup ? chatUser.name : chatUser.username}
-            </h2>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-              {chatUser.isGroup
-                ? `Nhóm (${groupMetadata?.members?.length || 0} thành viên)`
-                : 'X3DH + Double Ratchet E2EE'}
+            <div>
+              <h2 className="font-bold text-[var(--text-primary)] leading-tight">
+                {chatUser.displayName || chatUser.username || chatUser.name}
+              </h2>
+              <p className="text-[11px] text-[var(--text-secondary)]">
+                {isOnline ? 'Đang hoạt động' : 'Ngoại tuyến'}
+              </p>
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={handleWipeE2EE} title="Wipe E2EE State" className="w-9 h-9 rounded-full flex items-center justify-center text-red-400 hover:bg-red-500/10 transition-colors">
-            <Trash2 className="w-5 h-5" />
-          </button>
-          <button onClick={() => callUser(chatUser.id, false)} className="w-10 h-10 rounded-full flex items-center justify-center text-indigo-500 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
-            <Phone className="w-5 h-5" />
-          </button>
-          <button onClick={() => callUser(chatUser.id, true)} className="w-10 h-10 rounded-full flex items-center justify-center text-indigo-400 hover:bg-slate-800 hover:text-indigo-300 transition-colors">
-            <Video className="w-6 h-6" />
-          </button>
-        </div>
-      </div>
-
-
-
-      {/* Messages */}
-      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 z-10 relative custom-scrollbar scroll-smooth">
-        {isLoadingMore && <div className="flex justify-center py-2"><Loader2 className="w-5 h-5 animate-spin text-indigo-400" /></div>}
-        <div className="text-center mb-8 mt-4">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-xs text-indigo-300 shadow-sm">
-            <Lock className="w-3.5 h-3.5" />
-            {chatUser.isGroup
-              ? 'Sender Keys Protocol (AES-256-GCM)'
-              : 'X3DH Handshake + Double Ratchet (AES-256-GCM)'}
+          
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={() => callUser(chatUser.id, false)}
+              className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors"
+            >
+              <Phone className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => callUser(chatUser.id, true)}
+              className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors"
+            >
+              <Video className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={onToggleDetail}
+              className={`p-2 rounded-full transition-colors ${showDetail ? 'bg-blue-500/10 text-blue-500' : 'text-blue-500 hover:bg-[var(--hover)]'}`}
+            >
+              <Info className="w-5 h-5" />
+            </button>
           </div>
         </div>
-        {loadingHistory ? (
-          <div className="flex justify-center items-center h-full"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>
-        ) : (
-          messages
-            .filter(msg => msg.type !== 'SENDER_KEY_DISTRIBUTION') // [Fix] Never render control messages
-            .map((msg, idx) => {
-              const replied = msg.replyToId ? messages.find((m) => m.id === msg.replyToId) : null;
+
+        {/* Message Area */}
+        <div 
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4 space-y-2 bg-[var(--bg-primary)] scroll-smooth"
+        >
+          {loadingHistory && (
+            <div className="flex justify-center py-4">
+              <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+            </div>
+          )}
+          
+          {messages
+            .filter(msg => msg.type !== 'SENDER_KEY_DISTRIBUTION')
+            .map((msg, i) => {
+              const isMe = msg.senderId === currentUser?.id;
+              const prevMsg = messages[i - 1];
+              const showAvatar = !isMe && (!prevMsg || prevMsg.senderId !== msg.senderId);
+              
               return (
-                <MessageBubble
-                  key={msg.id || idx}
+                <MessageBubble 
+                  key={msg.id || msg.localId}
                   message={msg}
-                  isMe={msg.senderId === currentUser.id}
-                  members={groupMetadata?.members}
+                  isMe={isMe}
+                  showAvatar={showAvatar}
+                  avatarUrl={chatUser.avatarUrl}
                   onDelete={handleDeleteMessage}
                   onReact={handleReactMessage}
-                  onReply={() => { }}
-                  repliedMessage={replied}
+                  onReply={setReplyingTo}
+                  repliedMessage={msg.repliedToMessage}
                 />
               );
-            })
-        )}
-        {typingUsers.size > 0 && (
-          <div className="flex items-center gap-3 text-slate-400 mt-2 ml-4">
-            <div className="flex -space-x-2">
-              {Array.from(typingUsers).slice(0, 3).map(uid => (
-                <div key={uid} className="w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-900 flex justify-center items-center text-[10px] text-slate-300 font-bold overflow-hidden shadow-sm">
-                  {groupMetadata?.members?.find(m => m.userId === uid)?.User?.username?.charAt(0).toUpperCase() || '?'}
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-col gap-0.5">
-              <div className="px-3 py-2 bg-slate-800 rounded-2xl rounded-bl-sm flex gap-1 items-center w-fit shadow-sm">
-                <div className="w-1.2 h-1.2 bg-indigo-400 rounded-full animate-bounce" />
-                <div className="w-1.2 h-1.2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                <div className="w-1.2 h-1.2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+            })}
+          
+          {typingUsers.size > 0 && (
+            <div className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)] animate-pulse ml-10">
+              <div className="flex gap-1">
+                <span className="w-1 h-1 bg-[var(--text-secondary)] rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                <span className="w-1 h-1 bg-[var(--text-secondary)] rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                <span className="w-1 h-1 bg-[var(--text-secondary)] rounded-full animate-bounce"></span>
               </div>
-              <span className="text-[10px] ml-1 opacity-70 font-medium">
-                {Array.from(typingUsers).map(uid => groupMetadata?.members?.find(m => m.userId === uid)?.User?.username || 'Ai đó').join(', ')} đang nhập...
-              </span>
+              Đang soạn tin nhắn...
             </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
 
-      <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-gray-200 dark:border-slate-800/80 z-20 shrink-0 relative">
-        <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto flex items-center gap-2 p-4">
-          {!isRecording && (
-            <div className="flex items-center">
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 rounded-full transition-colors shrink-0">
-                <ImagePlus className="w-5 h-5" />
-              </button>
-              <button type="button" onClick={() => docInputRef.current?.click()} className="p-2.5 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-full transition-colors shrink-0">
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <button type="button" onClick={startRecording} className="p-2.5 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-full transition-colors shrink-0">
-                <Mic className="w-5 h-5" />
+        {/* Input Area */}
+        <div className="px-4 py-3 bg-[var(--bg-primary)] border-t border-[var(--border)]">
+          {replyingTo && (
+            <div className="mb-2 px-3 py-2 bg-[var(--hover)] rounded-xl flex items-center justify-between">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <CornerUpLeft className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
+                <p className="text-xs text-[var(--text-secondary)] truncate">
+                  Đang trả lời <span className="font-semibold text-[var(--text-primary)]">
+                    {replyingTo.senderId === currentUser?.id ? 'chính mình' : (chatUser.displayName || chatUser.username)}
+                  </span>: {replyingTo.decryptedContent}
+                </p>
+              </div>
+              <button onClick={() => setReplyingTo(null)} className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <X className="w-4 h-4" />
               </button>
             </div>
           )}
-          <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
-          <input type="file" ref={docInputRef} onChange={handleFileSelect} className="hidden" />
-          <div className="relative flex-1 flex">
-            {isRecording ? (
-              <div className="w-full border border-red-500/50 flex-1 py-1.5 pl-6 pr-4 rounded-full bg-red-500/10 flex items-center justify-between">
-                <div className="flex items-center gap-3 text-red-500">
-                  <Disc2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm font-medium animate-pulse">Recording... (Press SEND to finish)</span>
-                </div>
-                <button type="button" onClick={cancelRecording} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-500/20 text-red-400 transition">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="relative w-full">
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={handleInputTyping}
-                  placeholder="Send secure message..."
-                  className="w-full border text-[15px] rounded-full py-3 pl-5 pr-12 outline-none transition-all shadow-inner bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/50 border-gray-200 dark:border-slate-700"
-                />
-                <button
-                  type="button"
-                  onClick={toggleListen}
-                  className={`absolute right-4 top-1/2 -translate-y-1/2 transition z-30 ${isListening ? 'text-emerald-500 animate-pulse' : 'text-gray-400 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400'}`}
-                >
-                  {isListening ? <Disc2 className="w-4 h-4 animate-spin" /> : <MicOff className="w-4 h-4" />}
-                </button>
-              </div>
-            )}
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 shrink-0">
+              <button className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors">
+                <PlusCircle className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors"
+              >
+                <ImagePlus className="w-5 h-5" />
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
+              </button>
+              <button className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors">
+                <Sticker className="w-5 h-5" />
+              </button>
+              <button className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors">
+                <GifIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 relative flex items-center">
+              <input 
+                type="text"
+                placeholder="Aa"
+                className="w-full bg-[var(--input-bg)] text-[var(--text-primary)] rounded-full py-2 px-4 outline-none transition-colors border border-[var(--border)]"
+                value={newMessage}
+                onChange={handleInputTyping}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
+              />
+              <button className="absolute right-2 p-1 text-blue-500 hover:scale-110 transition-transform">
+                <Smile className="w-5 h-5" />
+              </button>
+            </div>
+
+            <button 
+              onClick={handleSendMessage}
+              className="p-2 text-blue-500 hover:scale-110 transition-transform shrink-0"
+            >
+              {newMessage.trim() ? <Send className="w-6 h-6" /> : <ThumbsUp className="w-6 h-6" />}
+            </button>
           </div>
-          <button
-            type="submit"
-            disabled={!isRecording && !newMessage.trim() && !isListening}
-            className="w-12 h-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-indigo-500/20 shrink-0"
-          >
-            <Send className="w-5 h-5 -ml-0.5 mt-0.5" />
-          </button>
-        </form>
+        </div>
       </div>
+
+      {/* Right Detail Panel */}
+      {showDetail && (
+        <div className="w-[320px] bg-[var(--bg-primary)] h-full overflow-y-auto flex flex-col items-center p-6 animate-slide-in-right border-l border-[var(--border)]">
+          <div className="w-24 h-24 rounded-full bg-[var(--hover)] flex items-center justify-center overflow-hidden mb-4 border border-[var(--border)]">
+             {chatUser.avatarUrl ? (
+                <img src={chatUser.avatarUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-3xl font-bold text-[var(--text-secondary)]">
+                  {(chatUser.displayName || chatUser.username || chatUser.name || '?').charAt(0).toUpperCase()}
+                </span>
+              )}
+          </div>
+          <h2 className="text-xl font-bold text-[var(--text-primary)] mb-1">
+            {chatUser.displayName || chatUser.username || chatUser.name}
+          </h2>
+          <p className="text-xs text-[var(--text-secondary)] mb-6 flex items-center gap-1.5">
+            <span className="w-2 h-2 bg-[#31a24c] rounded-full"></span>
+            Đang hoạt động
+          </p>
+
+          <div className="flex gap-4 w-full justify-center mb-8">
+            <div className="flex flex-col items-center gap-1">
+              <button className="w-10 h-10 rounded-full bg-[var(--hover)] flex items-center justify-center hover:brightness-90 transition-all">
+                <User className="w-5 h-5 text-[var(--text-primary)]" />
+              </button>
+              <span className="text-[11px] text-[var(--text-secondary)]">Trang cá nhân</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <button className="w-10 h-10 rounded-full bg-[var(--hover)] flex items-center justify-center hover:brightness-90 transition-all">
+                <Bell className="w-5 h-5 text-[var(--text-primary)]" />
+              </button>
+              <span className="text-[11px] text-[var(--text-secondary)]">Tắt thông báo</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <button className="w-10 h-10 rounded-full bg-[var(--hover)] flex items-center justify-center hover:brightness-90 transition-all">
+                <Search className="w-5 h-5 text-[var(--text-primary)]" />
+              </button>
+              <span className="text-[11px] text-[var(--text-secondary)]">Tìm kiếm</span>
+            </div>
+          </div>
+
+          <div className="w-full space-y-1">
+            {/* Section: Thông tin về đoạn chat */}
+            <DetailSection 
+              title="Thông tin về đoạn chat" 
+              isOpen={openSections.info} 
+              onToggle={() => toggleSection('info')}
+            >
+              <DetailAction icon={<Pin className="w-4 h-4" />} label="Xem tin nhắn đã ghim" />
+            </DetailSection>
+
+            {/* Section: Tùy chỉnh đoạn chat */}
+            <DetailSection 
+              title="Tùy chỉnh đoạn chat" 
+              isOpen={openSections.custom} 
+              onToggle={() => toggleSection('custom')}
+            >
+              <DetailAction icon={<div className="w-4 h-4 rounded-full bg-indigo-500" />} label="Đổi chủ đề" />
+              <DetailAction icon={<Smile className="w-4 h-4 text-yellow-500" />} label="Thay đổi biểu tượng cảm xúc" />
+              <DetailAction icon={<Type className="w-4 h-4" />} label="Chỉnh sửa biệt danh" />
+            </DetailSection>
+
+            {/* Section: File phương tiện & file */}
+            <DetailSection 
+              title="File phương tiện & file" 
+              isOpen={openSections.media} 
+              onToggle={() => toggleSection('media')}
+            >
+              <DetailAction icon={<Image className="w-4 h-4" />} label="File phương tiện" />
+              <DetailAction icon={<FileText className="w-4 h-4" />} label="File" />
+            </DetailSection>
+
+            {/* Section: Quyền riêng tư và hỗ trợ */}
+            <DetailSection 
+              title="Quyền riêng tư và hỗ trợ" 
+              isOpen={openSections.privacy} 
+              onToggle={() => toggleSection('privacy')}
+            >
+              <DetailAction icon={<Bell className="w-4 h-4" />} label="Tắt thông báo" />
+              <DetailAction icon={<MessageCircle className="w-4 h-4" />} label="Quyền nhắn tin" />
+              <DetailAction icon={<Clock className="w-4 h-4" />} label="Tin nhắn tự hủy" />
+              <DetailAction icon={<Eye className="w-4 h-4" />} label="Thông báo đã đọc" subLabel="Tắt" />
+              <DetailAction icon={<Shield className="w-4 h-4" />} label="Xác minh mã hóa đầu cuối" />
+              <DetailAction icon={<Ban className="w-4 h-4" />} label="Hạn chế" />
+              <DetailAction icon={<UserMinus className="w-4 h-4" />} label="Chặn" />
+              <DetailAction icon={<AlertCircle className="w-4 h-4" />} label="Báo cáo" subLabel="Đóng góp ý kiến và báo cáo cuộc trò chuyện" />
+            </DetailSection>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 
 export default ChatWindow;
