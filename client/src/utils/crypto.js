@@ -76,7 +76,7 @@ export async function generateECDSAKeyPair() {
     true,
     ['sign', 'verify']
   );
-  const publicKeyRaw = await window.crypto.subtle.exportKey('raw', keyPair.publicKey);
+  const publicKeyRaw = await window.crypto.subtle.exportKey('spki', keyPair.publicKey);
   const publicKeyBase64 = arrayBufferToBase64(publicKeyRaw);
   return { publicKey: keyPair.publicKey, privateKey: keyPair.privateKey, publicKeyBase64 };
 }
@@ -95,7 +95,7 @@ export async function verifySignatureECDSA(publicKeyBase64, signatureBase64, dat
   const sigBytes = base64ToArrayBuffer(signatureBase64);
   
   const publicKey = await window.crypto.subtle.importKey(
-    'raw',
+    'spki',
     publicKeyRaw,
     { name: 'ECDSA', namedCurve: 'P-256' },
     true,

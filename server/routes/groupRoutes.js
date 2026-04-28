@@ -29,4 +29,16 @@ router.post('/:groupId/messages/:messageId/react', requireGroupMembership, group
 // Delete (revoke) a message (must be a member — ownership check is in the controller)
 router.delete('/:groupId/messages/:messageId', requireGroupMembership, groupController.deleteGroupMessage);
 
+// Get group participation statistics
+router.get('/:groupId/stats', requireGroupMembership, groupController.getGroupStats);
+
+// Delete a group (admin only)
+router.delete('/:groupId', requireGroupMembership, groupController.deleteGroup);
+
+// Update group settings
+router.patch('/:groupId/settings', requireGroupMembership, groupController.updateGroupSettings);
+
+// Update member settings
+router.patch('/:groupId/members/:memberId/settings', requireGroupMembership, groupController.updateMemberSettings);
+
 module.exports = router;

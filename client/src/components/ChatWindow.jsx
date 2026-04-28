@@ -35,8 +35,9 @@ import {
 import { getKey } from '../utils/keyStore';
 import { saveMySenderKey, loadMySenderKey, saveTheirSenderKey, loadTheirSenderKey } from '../utils/senderKeyStore';
 import MessageBubble from './MessageBubble';
+import AttendanceManager from './AttendanceManager';
 import {
-  Phone, Video, CornerUpLeft, X, Info, ChevronRight, ChevronDown, User, Bell, Search, PlusCircle, Sticker, Gift as GifIcon, Smile, ThumbsUp, Pin, Settings, Type, Image, FileText, BellOff, MessageCircle, Clock, Eye, Shield, Ban, UserMinus, AlertCircle, Loader2, ImagePlus, Send
+  Phone, Video, CornerUpLeft, X, Info, ChevronRight, ChevronDown, User, Bell, Search, PlusCircle, Sticker, Gift as GifIcon, Smile, ThumbsUp, Pin, Settings, Type, Image, FileText, BellOff, MessageCircle, Clock, Eye, Shield, Ban, UserMinus, AlertCircle
 } from 'lucide-react';
 
 const globalAutoInitRegistry = new Set();
@@ -54,13 +55,16 @@ const DetailSection = ({ title, isOpen, onToggle, children }) => (
   </div>
 );
 
-const DetailAction = ({ icon, label, subLabel }) => (
-  <button className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--hover)] transition-colors text-left group">
-    <div className="w-8 h-8 shrink-0 flex items-center justify-center text-[var(--text-primary)]">
+const DetailAction = ({ icon, label, subLabel, onClick, danger }) => (
+  <button 
+    onClick={onClick}
+    className={`w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--hover)] transition-colors text-left group ${danger ? 'text-red-500' : ''}`}
+  >
+    <div className={`w-8 h-8 shrink-0 flex items-center justify-center ${danger ? 'text-red-500' : 'text-[var(--text-primary)]'}`}>
       {icon}
     </div>
     <div className="flex-1 min-w-0">
-      <p className="text-[14px] font-medium text-[var(--text-primary)] truncate">{label}</p>
+      <p className={`text-[14px] font-medium truncate ${danger ? 'text-red-500' : 'text-[var(--text-primary)]'}`}>{label}</p>
       {subLabel && <p className="text-[11px] text-[var(--text-secondary)] truncate">{subLabel}</p>}
     </div>
   </button>
@@ -93,8 +97,16 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
     info: true,
     custom: true,
     media: true,
-    privacy: true
+    privacy: true,
+    admin: true
   });
+  const [isAttendanceOpen, setIsAttendanceOpen] = useState(false);
+  const isTeacher = !!(chatUser.isGroup && currentUser?.id && (
+    groupMetadata?.members?.find(m => String(m.userId || m.id) === String(currentUser.id))?.role === 'admin' ||
+    String(chatUser.createdBy || '') === String(currentUser.id)
+  ));
+
+  // console.log('[Attendance-Debug] isTeacher:', isTeacher, 'currentUser:', currentUser?.id, 'createdBy:', chatUser.createdBy);
 
   const toggleSection = (section) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -160,6 +172,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
     window.addEventListener('e2ee_desync_detected', handleDesync);
     return () => window.removeEventListener('e2ee_desync_detected', handleDesync);
   }, [socket]);
+
 
 
 
@@ -241,6 +254,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
 
               setMessages(prev => {
                 if (prev.find(m => m.id === msg.id || (m.localId && m.localId === msg.localId))) return prev;
+                if (msg.groupId) window.dispatchEvent(new CustomEvent('new_group_message_stats_update'));
                 return [...prev, { ...msg, decryptedContent: content, senderName, status: 'received' }].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
               });
             }
@@ -970,7 +984,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
             n: currentIndex,
             pn: session.previousCounter || 0,
             iv: encrypted.ivB64,
-            senderId: currentUser.id,
+            senderId: currentUser?.id,
             senderEk,
             usedOpk,
             type: 'SENDER_KEY_DISTRIBUTION',
@@ -1116,7 +1130,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           await saveDecryptedMessage(msgLocalId, {
             text,
             groupId: activeId,
-            senderId: currentUser.id,
+            senderId: currentUser?.id,
             timestamp: new Date().toISOString()
           }, masterKey);
 
@@ -1205,7 +1219,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           // [Fix] Save plaintext to local cache so sender can see it after refresh
           await saveDecryptedMessage(localId, {
             text,
-            senderId: currentUser.id,
+            senderId: currentUser?.id,
             recipientId: activeId,
             timestamp: new Date().toISOString()
           }, masterKey);
@@ -1224,7 +1238,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           n: currentIndex,
           pn: session.previousCounter || 0,
           iv: ivB64,
-          senderId: currentUser.id,
+          senderId: currentUser?.id,
           senderEk, usedOpk, localId,
           type: type || 'text'
         });
@@ -1241,46 +1255,6 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
   };
 
 
-  const handleSendMessage = async (e, forcedText = null) => {
-    if (e) e.preventDefault();
-    if (isRecording) { stopRecordingAndSend(); return; }
-
-    const t = forcedText || newMessage;
-    if (!t.trim()) return;
-
-    if (!forcedText) {
-      setNewMessage('');
-      if (socket) socket.emit('stopTyping', { recipientId: chatUser.id });
-    }
-
-    const localId = `loc-${Date.now()}`;
-
-    // Immediate UI Feedback (Optimistic)
-    const optimisticMsg = {
-      id: localId,
-      localId: localId,
-      senderId: currentUser.id,
-      recipientId: chatUser.id,
-      decryptedContent: t,
-      createdAt: new Date().toISOString(),
-      status: 'sending'
-    };
-
-    setMessages(prev => {
-      if (prev.some(m => m.id === localId)) return prev;
-      return [...prev, optimisticMsg].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    });
-
-    // Queue for sequential processing with Context Binding
-    outgoingQueueRef.current.push({
-      text: t,
-      localId,
-      type: 'text',
-      isGroup: chatUser.isGroup,
-      targetId: chatUser.id
-    });
-    triggerOutgoingWorker();
-  };
 
   const triggerOutgoingWorker = () => {
     outgoingProcessChainRef.current = outgoingProcessChainRef.current.then(async () => {
@@ -1410,9 +1384,106 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
 
   const handleDeleteMessage = (id) => { if (window.confirm('Revoke this message?')) socket.emit('deleteMessage', { messageId: id, recipientId: chatUser.id }); };
   const handleReactMessage = (id, reaction) => socket.emit('reactMessage', { messageId: id, recipientId: chatUser.id, reaction });
+  
+  const handleDeleteGroup = async () => {
+    if (!window.confirm(`Bạn có chắc chắn muốn giải tán nhóm "${chatUser.name || chatUser.username}"? Hành động này không thể hoàn tác.`)) return;
+    try {
+      await api.delete(`/api/groups/${chatUser.id}`);
+      window.dispatchEvent(new CustomEvent('group_deleted', { detail: { groupId: chatUser.id } }));
+      alert('Nhóm đã được giải tán thành công.');
+    } catch (err) {
+      alert('Không thể xóa nhóm: ' + (err.response?.data?.error || err.message));
+    }
+  };
 
+  const handleUpdateTheme = async (color) => {
+    try {
+      await api.patch(`/api/groups/${chatUser.id}/settings`, { themeColor: color });
+      setGroupMetadata(prev => ({ ...prev, group: { ...prev.group, themeColor: color } }));
+    } catch (err) { alert('Lỗi khi đổi chủ đề'); }
+  };
 
+  const handleUpdateEmoji = async (emoji) => {
+    try {
+      await api.patch(`/api/groups/${chatUser.id}/settings`, { quickEmoji: emoji });
+      setGroupMetadata(prev => ({ ...prev, group: { ...prev.group, quickEmoji: emoji } }));
+    } catch (err) { alert('Lỗi khi đổi biểu tượng'); }
+  };
 
+  const handleUpdateNickname = async (userId, oldNickname) => {
+    const name = window.prompt('Nhập biệt danh mới:', oldNickname || '');
+    if (name === null) return;
+    try {
+      await api.patch(`/api/groups/${chatUser.id}/members/${userId}/settings`, { nickname: name });
+      fetchGroupMetadata(); // Refresh full list
+    } catch (err) { alert('Lỗi khi đổi biệt danh'); }
+  };
+
+  const handleUpdateMute = async (isMuted) => {
+    try {
+      await api.patch(`/api/groups/${chatUser.id}/members/${currentUser.id}/settings`, { muteNotifications: isMuted });
+      alert(isMuted ? 'Đã tắt thông báo' : 'Đã bật thông báo');
+    } catch (err) { alert('Lỗi khi cập nhật thông báo'); }
+  };
+
+  const handleUpdateSelfDestruct = async (seconds) => {
+    try {
+      await api.patch(`/api/groups/${chatUser.id}/settings`, { selfDestructTimer: seconds });
+      setGroupMetadata(prev => ({ ...prev, group: { ...prev.group, selfDestructTimer: seconds } }));
+    } catch (err) { alert('Lỗi khi cài đặt tin nhắn tự hủy'); }
+  };
+
+  const handleSendMessage = useCallback(async (e, forcedText = null) => {
+    if (e) e.preventDefault();
+    if (isRecording) { stopRecordingAndSend(); return; }
+
+    const t = forcedText || newMessage;
+    if (!t.trim()) return;
+
+    if (!forcedText) {
+      setNewMessage('');
+      if (socket) socket.emit('stopTyping', { recipientId: chatUser.id });
+    }
+
+    const localId = `loc-${Date.now()}`;
+
+    // Immediate UI Feedback (Optimistic)
+    const optimisticMsg = {
+      id: localId,
+      localId: localId,
+      senderId: currentUser?.id,
+      recipientId: chatUser.id,
+      decryptedContent: t,
+      createdAt: new Date().toISOString(),
+      status: 'sending'
+    };
+
+    setMessages(prev => {
+      if (prev.some(m => m.id === localId)) return prev;
+      return [...prev, optimisticMsg].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    });
+
+    // Queue for sequential processing with Context Binding
+    outgoingQueueRef.current.push({
+      text: t,
+      localId,
+      type: 'text',
+      isGroup: chatUser.isGroup,
+      targetId: chatUser.id
+    });
+    triggerOutgoingWorker();
+    if (chatUser.isGroup) window.dispatchEvent(new CustomEvent('new_group_message_stats_update'));
+  }, [chatUser.id, chatUser.isGroup, currentUser?.id, newMessage, socket, isRecording, stopRecordingAndSend]);
+
+  useEffect(() => {
+    const handleSystemMsg = (e) => {
+      if (e.detail.groupId === chatUser.id) {
+        handleSendMessage(null, e.detail.text);
+      }
+    };
+    window.addEventListener('send_system_message', handleSystemMsg);
+    return () => window.removeEventListener('send_system_message', handleSystemMsg);
+  }, [chatUser.id, handleSendMessage]);
 
   // [Sync] Live Message Listeners
   useEffect(() => {
@@ -1510,6 +1581,16 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
             >
               <Info className="w-5 h-5" />
             </button>
+            {chatUser.isGroup && (
+              <button 
+                onClick={() => setIsAttendanceOpen(true)}
+                className="p-2 text-green-500 hover:bg-[var(--hover)] rounded-full transition-colors flex items-center gap-1 group relative"
+                title="Điểm danh"
+              >
+                <User className="w-5 h-5" />
+                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-[var(--bg-primary)] animate-pulse"></span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1521,7 +1602,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
         >
           {loadingHistory && (
             <div className="flex justify-center py-4">
-              <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+              <Clock className="w-6 h-6 text-blue-500 animate-spin" />
             </div>
           )}
           
@@ -1587,7 +1668,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
                 onClick={() => fileInputRef.current?.click()}
                 className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors"
               >
-                <ImagePlus className="w-5 h-5" />
+                <Image className="w-5 h-5" />
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
               </button>
               <button className="p-2 text-blue-500 hover:bg-[var(--hover)] rounded-full transition-colors">
@@ -1602,7 +1683,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
               <input 
                 type="text"
                 placeholder="Aa"
-                className="w-full bg-[var(--input-bg)] text-[var(--text-primary)] rounded-full py-2 px-4 outline-none transition-colors border border-[var(--border)]"
+                className="w-full rounded-full py-2 px-4 outline-none transition-colors border border-[var(--border)] bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-white"
                 value={newMessage}
                 onChange={handleInputTyping}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
@@ -1616,7 +1697,7 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
               onClick={handleSendMessage}
               className="p-2 text-blue-500 hover:scale-110 transition-transform shrink-0"
             >
-              {newMessage.trim() ? <Send className="w-6 h-6" /> : <ThumbsUp className="w-6 h-6" />}
+              {newMessage.trim() ? <MessageCircle className="w-6 h-6" /> : <ThumbsUp className="w-6 h-6" />}
             </button>
           </div>
         </div>
@@ -1666,12 +1747,49 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           <div className="w-full space-y-1">
             {/* Section: Thông tin về đoạn chat */}
             <DetailSection 
-              title="Thông tin về đoạn chat" 
+              title={`Thành viên nhóm (${groupMetadata?.members?.length || 0})`} 
               isOpen={openSections.info} 
               onToggle={() => toggleSection('info')}
             >
+              <div className="px-4 py-3 space-y-3">
+                {groupMetadata?.members?.map(m => (
+                  <div key={m.id} className="flex items-center gap-3 group/member">
+                    <div className="w-9 h-9 rounded-full bg-gray-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden border border-[var(--border)]">
+                       {m.User?.avatarUrl ? (
+                         <img src={m.User.avatarUrl} alt="" className="w-full h-full object-cover" />
+                       ) : (
+                         <User className="w-5 h-5 text-gray-400" />
+                       )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                       <p className="text-sm font-semibold truncate text-[var(--text-primary)]">
+                         {m.User?.displayName || m.User?.username}
+                         {String(m.userId) === String(currentUser?.id) && " (Bạn)"}
+                       </p>
+                       <p className="text-[10px] text-[var(--text-secondary)] font-medium capitalize">
+                         {m.role === 'admin' ? 'Quản trị viên' : 'Thành viên'}
+                       </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
               <DetailAction icon={<Pin className="w-4 h-4" />} label="Xem tin nhắn đã ghim" />
             </DetailSection>
+
+            {isTeacher && (
+              <DetailSection 
+                title="Quản lý nhóm" 
+                isOpen={openSections.admin} 
+                onToggle={() => toggleSection('admin')}
+              >
+                <DetailAction 
+                  icon={<Trash2 className="w-4 h-4 text-red-500" />} 
+                  label="Giải tán nhóm" 
+                  onClick={handleDeleteGroup}
+                  danger
+                />
+              </DetailSection>
+            )}
 
             {/* Section: Tùy chỉnh đoạn chat */}
             <DetailSection 
@@ -1679,9 +1797,30 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
               isOpen={openSections.custom} 
               onToggle={() => toggleSection('custom')}
             >
-              <DetailAction icon={<div className="w-4 h-4 rounded-full bg-indigo-500" />} label="Đổi chủ đề" />
-              <DetailAction icon={<Smile className="w-4 h-4 text-yellow-500" />} label="Thay đổi biểu tượng cảm xúc" />
-              <DetailAction icon={<Type className="w-4 h-4" />} label="Chỉnh sửa biệt danh" />
+              <div className="px-4 py-2 flex gap-2 overflow-x-auto pb-3 no-scrollbar">
+                {['#0084ff', '#ff5252', '#4caf50', '#9c27b0', '#ff9800', '#607d8b'].map(c => (
+                  <button 
+                    key={c} 
+                    onClick={() => handleUpdateTheme(c)}
+                    className={`w-6 h-6 rounded-full shrink-0 border-2 ${groupMetadata?.group?.themeColor === c ? 'border-white ring-2 ring-blue-500' : 'border-transparent'}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+              <DetailAction 
+                icon={<Smile className="w-4 h-4 text-yellow-500" />} 
+                label="Thay đổi biểu tượng cảm xúc" 
+                subLabel={groupMetadata?.group?.quickEmoji || '👍'}
+                onClick={() => {
+                  const e = window.prompt('Nhập emoji nhanh:', groupMetadata?.group?.quickEmoji || '👍');
+                  if (e) handleUpdateEmoji(e);
+                }}
+              />
+              <DetailAction 
+                icon={<Type className="w-4 h-4" />} 
+                label="Chỉnh sửa biệt danh" 
+                onClick={() => handleUpdateNickname(currentUser.id, '')}
+              />
             </DetailSection>
 
             {/* Section: File phương tiện & file */}
@@ -1700,9 +1839,17 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
               isOpen={openSections.privacy} 
               onToggle={() => toggleSection('privacy')}
             >
-              <DetailAction icon={<Bell className="w-4 h-4" />} label="Tắt thông báo" />
+              <DetailAction icon={<Bell className="w-4 h-4" />} label="Tắt thông báo" onClick={() => handleUpdateMute(true)} />
               <DetailAction icon={<MessageCircle className="w-4 h-4" />} label="Quyền nhắn tin" />
-              <DetailAction icon={<Clock className="w-4 h-4" />} label="Tin nhắn tự hủy" />
+              <DetailAction 
+                icon={<Clock className="w-4 h-4" />} 
+                label="Tin nhắn tự hủy" 
+                subLabel={groupMetadata?.group?.selfDestructTimer > 0 ? `${groupMetadata.group.selfDestructTimer} giây` : 'Tắt'}
+                onClick={() => {
+                  const s = window.prompt('Nhập số giây tự hủy (0 để tắt):', groupMetadata?.group?.selfDestructTimer || 0);
+                  if (s !== null) handleUpdateSelfDestruct(parseInt(s));
+                }}
+              />
               <DetailAction icon={<Eye className="w-4 h-4" />} label="Thông báo đã đọc" subLabel="Tắt" />
               <DetailAction icon={<Shield className="w-4 h-4" />} label="Xác minh mã hóa đầu cuối" />
               <DetailAction icon={<Ban className="w-4 h-4" />} label="Hạn chế" />
@@ -1712,6 +1859,12 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           </div>
         </div>
       )}
+      <AttendanceManager 
+        groupId={chatUser.id} 
+        isOpen={isAttendanceOpen} 
+        onClose={() => setIsAttendanceOpen(false)} 
+        isTeacher={isTeacher} 
+      />
     </div>
   );
 };

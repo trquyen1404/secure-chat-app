@@ -84,7 +84,7 @@ const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
             <input 
               type="text"
               placeholder="Ví dụ: Hội Nghiên Cứu E2EE"
-              className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 dark:text-white transition-all shadow-sm"
+              className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 text-gray-900 dark:text-white transition-all shadow-sm"
               value={name}
               onChange={e => setName(e.target.value)}
             />

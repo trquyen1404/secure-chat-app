@@ -23,6 +23,14 @@ const GroupMember = sequelize.define('GroupMember', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  nickname: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  muteNotifications: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
 }, {
   timestamps: true,
   indexes: [

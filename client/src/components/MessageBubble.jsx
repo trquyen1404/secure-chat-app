@@ -59,7 +59,46 @@ const MessageBubble = ({ message, isMe, showAvatar, avatarUrl, onDelete, onReact
                   {message.encryptedContent}
                 </div>
               ) : (
-                message.decryptedContent
+                <div className="flex flex-col gap-2">
+                  {isImage ? (
+                    <div className="rounded-lg overflow-hidden cursor-pointer hover:brightness-95 transition-all">
+                      <img 
+                        src={message.decryptedContent.replace('[IMG]', '')} 
+                        alt="Sent image" 
+                        className="max-w-full max-h-[300px] object-cover rounded-lg"
+                        onClick={() => window.open(message.decryptedContent.replace('[IMG]', ''), '_blank')}
+                      />
+                    </div>
+                  ) : isAudio ? (
+                    <audio 
+                      controls 
+                      className="max-w-[240px] h-10 accent-blue-500"
+                      src={message.decryptedContent.replace('[AUDIO]', '')}
+                    />
+                  ) : isFile ? (() => {
+                    const parts = message.decryptedContent.match(/\[FILE\|(.*?)\](.*)/);
+                    if (!parts) return message.decryptedContent;
+                    const fileName = parts[1];
+                    const fileData = parts[2];
+                    return (
+                      <a 
+                        href={fileData} 
+                        download={fileName}
+                        className="flex items-center gap-2 p-2 bg-black/10 rounded-lg hover:bg-black/20 transition-colors no-underline text-inherit"
+                      >
+                        <div className="w-8 h-8 rounded bg-blue-500 flex items-center justify-center text-white">
+                          <Code2 className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{fileName}</p>
+                          <p className="text-[10px] opacity-60">Nhấn để tải về</p>
+                        </div>
+                      </a>
+                    );
+                  })() : (
+                    <span className="whitespace-pre-wrap">{message.decryptedContent}</span>
+                  )}
+                </div>
               )
             )}
           </div>

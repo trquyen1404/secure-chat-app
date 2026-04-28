@@ -19,6 +19,18 @@ const Group = sequelize.define('Group', {
     type: DataTypes.UUID,
     allowNull: false,
   },
+  themeColor: {
+    type: DataTypes.STRING,
+    defaultValue: '#0084ff',
+  },
+  quickEmoji: {
+    type: DataTypes.STRING,
+    defaultValue: '👍',
+  },
+  selfDestructTimer: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0, // 0 = disabled, else seconds
+  },
 }, {
   timestamps: true,
 });

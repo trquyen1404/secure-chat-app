@@ -15,7 +15,9 @@ const db = {
   GroupMember,
   PreKey,
   GroupMessage,
-  Block
+  Block,
+  AttendanceSession: require('./AttendanceSession'),
+  AttendanceRecord: require('./AttendanceRecord')
 };
 
 // Establish associations

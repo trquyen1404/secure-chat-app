@@ -68,9 +68,23 @@ const Sidebar = ({ selectedUser, onSelectUser }) => {
 
     socket.on('newMessage', handleNewMsg);
     socket.on('newGroupMessage', handleNewGrpMsg);
+
+    const handleForcedLogout = () => logout();
+    const handleTokenRefreshed = (e) => setToken(e.detail);
+    const handleGroupDeleted = (e) => {
+      setGroups(prev => prev.filter(g => g.id !== e.detail.groupId));
+    };
+
+    window.addEventListener('auth-logout', handleForcedLogout);
+    window.addEventListener('auth-refreshed', handleTokenRefreshed);
+    window.addEventListener('group_deleted', handleGroupDeleted);
+
     return () => {
       socket.off('newMessage', handleNewMsg);
       socket.off('newGroupMessage', handleNewGrpMsg);
+      window.removeEventListener('auth-logout', handleForcedLogout);
+      window.removeEventListener('auth-refreshed', handleTokenRefreshed);
+      window.removeEventListener('group_deleted', handleGroupDeleted);
     };
   }, [socket, user?.id, masterKey]);
 
