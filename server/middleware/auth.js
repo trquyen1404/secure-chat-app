@@ -1,8 +1,9 @@
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
 const JWT_SECRET = process.env.JWT_SECRET; // Guaranteed set by server.js startup check
 
-const auth = (req, res, next) => {
+const auth = async (req, res, next) => {
   try {
     const authHeader = req.header('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -10,6 +11,13 @@ const auth = (req, res, next) => {
     }
     const token = authHeader.slice(7); // Remove 'Bearer ' prefix cleanly
     const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // [Security Hardening] Verify tokenVersion to support global logout/revocation
+    const user = await User.findByPk(decoded.userId, { attributes: ['id', 'tokenVersion'] });
+    if (!user || user.tokenVersion !== decoded.tokenVersion) {
+      return res.status(401).json({ error: 'Token đã bị thu hồi hoặc phiên đã đổi. Vui lòng đăng nhập lại.' });
+    }
+
     req.userId = decoded.userId;
     next();
   } catch (error) {

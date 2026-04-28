@@ -10,18 +10,10 @@ const GroupMessage = sequelize.define('GroupMessage', {
   groupId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: {
-      model: 'Groups',
-      key: 'id',
-    },
   },
   senderId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: {
-      model: 'Users',
-      key: 'id',
-    },
   },
   encryptedContent: {
     type: DataTypes.TEXT,
@@ -53,6 +45,10 @@ const GroupMessage = sequelize.define('GroupMessage', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  signature: {
+    type: DataTypes.TEXT,
+    allowNull: true,  // [Fix] ECDSA signature over ciphertext+IV+AD for group message integrity
+  },
   replyToId: {
     type: DataTypes.UUID,
     allowNull: true,
@@ -82,6 +78,15 @@ const GroupMessage = sequelize.define('GroupMessage', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  type: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'text',
+  },
+  localId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 }, {
   timestamps: true,
   indexes: [
@@ -93,5 +98,12 @@ const GroupMessage = sequelize.define('GroupMessage', {
     }
   ]
 });
+
+GroupMessage.associate = (models) => {
+  GroupMessage.belongsTo(models.Group, { foreignKey: 'groupId', as: 'Group' });
+  GroupMessage.belongsTo(models.User, { foreignKey: 'senderId', as: 'Sender' });
+  GroupMessage.hasMany(models.GroupMessage, { as: 'Replies', foreignKey: 'replyToId' });
+  GroupMessage.belongsTo(models.GroupMessage, { as: 'ReplyTo', foreignKey: 'replyToId' });
+};
 
 module.exports = GroupMessage;

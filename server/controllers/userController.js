@@ -1,15 +1,53 @@
 const { Op, Sequelize } = require('sequelize');
-const User = require('../models/User');
-const PreKey = require('../models/PreKey');
-const PinnedChat = require('../models/PinnedChat');
-const Friendship = require('../models/Friendship');
-const Message = require('../models/Message');
+const { User, Message, PreKey, Block, Friendship } = require('../models');
+const multer = require('multer');
+const path = require('path');
+
+// Configure Multer for Avatar Uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'public/uploads/avatars');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'user-' + req.userId + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png|webp/;
+    const mimetype = filetypes.test(file.mimetype);
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    if (mimetype && extname) return cb(null, true);
+    cb(new Error('Chỉ chấp nhận định dạng ảnh (jpeg, jpg, png, webp)'));
+  }
+}).single('avatar');
+
+exports.uploadAvatarMiddleware = upload;
 
 // ── X3DH PreKey Management ──────────────────────────────────────────────────
 
 exports.getPreKeyBundle = async (req, res) => {
   try {
     const { userId } = req.params;
+
+    // [Security] Block check
+    const isBlocked = await Block.findOne({
+      where: {
+        [Op.or]: [
+          { blockerId: req.userId, blockedId: userId },
+          { blockerId: userId, blockedId: req.userId }
+        ]
+      }
+    });
+
+    if (isBlocked) {
+      return res.status(403).json({ error: 'Truy cập bị từ chối (Blocking active)' });
+    }
+
     const user = await User.findByPk(userId, { attributes: ['id', 'username', 'publicKey', 'dhPublicKey'] });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -23,7 +61,6 @@ exports.getPreKeyBundle = async (req, res) => {
       order: [Sequelize.fn('RANDOM')]
     });
 
-    // Đánh dấu One-time PreKey đã sử dụng để tránh dùng lại (tăng tính bảo mật X3DH)
     if (otpk) await otpk.update({ isUsed: true });
 
     res.json({
@@ -37,7 +74,7 @@ exports.getPreKeyBundle = async (req, res) => {
   }
 };
 
-exports.uploadPreKeys = async (req, res) => {
+exports.updatePreKeys = async (req, res) => {
   try {
     const { signedPreKey, oneTimePreKeys } = req.body;
     if (!signedPreKey || !signedPreKey.publicKey || !signedPreKey.signature) {
@@ -45,7 +82,6 @@ exports.uploadPreKeys = async (req, res) => {
     }
 
     await User.sequelize.transaction(async (t) => {
-      // Xóa các khóa cũ của user trước khi cập nhật mới (hoặc giữ lại tùy logic app)
       await PreKey.destroy({ where: { userId: req.userId }, transaction: t });
 
       await PreKey.create({
@@ -68,36 +104,107 @@ exports.uploadPreKeys = async (req, res) => {
 
     res.json({ success: true, message: 'PreKeys updated successfully' });
   } catch (error) {
-    console.error('[uploadPreKeys error]', error);
+    console.error('[updatePreKeys error]', error);
     res.status(500).json({ error: 'Failed to update PreKeys' });
+  }
+};
+
+exports.uploadOpks = async (req, res) => {
+  try {
+    const { oneTimePreKeys } = req.body;
+    if (!oneTimePreKeys || !Array.isArray(oneTimePreKeys)) {
+      return res.status(400).json({ error: 'oneTimePreKeys array is required' });
+    }
+    
+    await User.sequelize.transaction(async (t) => {
+      await PreKey.destroy({ where: { userId: req.userId, type: 'one-time' }, transaction: t });
+      const opkRecords = oneTimePreKeys.map((k, index) => ({
+        userId: req.userId,
+        publicKey: k.publicKey,
+        type: 'one-time'
+      }));
+      await PreKey.bulkCreate(opkRecords, { transaction: t });
+    });
+    
+    res.json({ success: true, message: 'OPKs updated successfully' });
+  } catch (error) {
+    console.error('[uploadOpks error]', error);
+    res.status(500).json({ error: 'Failed to update OPKs' });
+  }
+};
+
+exports.clearPreKeys = async (req, res) => {
+  try {
+    await PreKey.destroy({ where: { userId: req.userId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to clear PreKeys' });
   }
 };
 
 // ── User Listing & Status ────────────────────────────────────────────────────
 
-async function getContactIds(userId) {
-  const rows = await Message.findAll({
-    where: { [Op.or]: [{ senderId: userId }, { recipientId: userId }] },
-    attributes: ['senderId', 'recipientId'],
-    raw: true,
-  });
-  const ids = new Set();
-  rows.forEach(r => {
-    if (r.senderId !== userId) ids.add(r.senderId);
-    if (r.recipientId !== userId) ids.add(r.recipientId);
-  });
-  return Array.from(ids);
-}
-
 exports.getUsers = async (req, res) => {
   try {
+    const currentUserId = req.userId;
+    const blocks = await Block.findAll({
+      where: { [Op.or]: [{ blockerId: currentUserId }, { blockedId: currentUserId }] },
+      raw: true
+    });
+    const blockedIds = blocks.map(b => b.blockerId === currentUserId ? b.blockedId : b.blockerId);
+
     const users = await User.findAll({
-      where: { id: { [Op.ne]: req.userId } },
-      attributes: ['id', 'username', 'online', 'avatarUrl', 'themeColor', 'lastSeenAt', 'publicKey', 'dhPublicKey']
+      where: { 
+        id: { 
+          [Op.and]: [
+            { [Op.ne]: currentUserId },
+            { [Op.notIn]: blockedIds }
+          ]
+        } 
+      },
+      attributes: ['id', 'username', 'displayName', 'online', 'avatarUrl', 'themeColor', 'lastSeenAt', 'publicKey', 'dhPublicKey']
+    });
+
+    const usersWithLatestMsg = await Promise.all(users.map(async (u) => {
+      const latestMessage = await Message.findOne({
+        where: {
+          [Op.or]: [
+            { senderId: currentUserId, recipientId: u.id },
+            { senderId: u.id, recipientId: currentUserId }
+          ],
+          type: { [Op.notIn]: ['handshake_ack', 'SENDER_KEY_DISTRIBUTION', 'SESSION_DESYNC_ERROR'] }
+        },
+        order: [['createdAt', 'DESC']],
+        attributes: ['id', 'senderId', 'recipientId', 'encryptedContent', 'readAt', 'createdAt', 'type']
+      });
+
+      return {
+        ...u.get({ plain: true }),
+        latestMessage: latestMessage || null
+      };
+    }));
+
+    res.json(usersWithLatestMsg);
+  } catch (error) {
+    console.error('[getUsers]', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+};
+
+exports.searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) return res.json([]);
+    const users = await User.findAll({
+      where: {
+        username: { [Op.iLike]: `%${query}%` },
+        id: { [Op.ne]: req.userId }
+      },
+      attributes: ['id', 'username', 'displayName', 'avatarUrl']
     });
     res.json(users);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch users' });
+    res.status(500).json({ error: 'Failed to search users' });
   }
 };
 
@@ -113,44 +220,25 @@ exports.getStatus = async (req, res) => {
 
 // ── Profile Management ───────────────────────────────────────────────────────
 
-exports.updateAvatar = async (req, res) => {
+exports.getMe = async (req, res) => {
   try {
-    const { avatarUrl } = req.body;
-    await User.update({ avatarUrl }, { where: { id: req.userId } });
-    res.json({ success: true, avatarUrl });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update avatar' });
-  }
-};
-
-exports.updateTheme = async (req, res) => {
-  try {
-    const { themeColor } = req.body;
-    await User.update({ themeColor }, { where: { id: req.userId } });
-    res.json({ success: true, themeColor });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update theme' });
-  }
-};
-
-exports.updateProfile = async (req, res) => {
-  try {
-    const { fullName, bio, phoneNumber, profilePrivacy } = req.body;
-    await User.update({ fullName, bio, phoneNumber, profilePrivacy }, { where: { id: req.userId } });
-
-    const updatedUser = await User.findByPk(req.userId, {
-      attributes: ['id', 'username', 'avatarUrl', 'fullName', 'bio', 'phoneNumber', 'profilePrivacy']
+    const user = await User.findByPk(req.userId, {
+      attributes: [
+        'id', 'username', 'displayName', 'fullName', 'bio', 'phoneNumber', 'avatarUrl', 'themeColor', 
+        'online', 'lastSeenAt', 'publicKey', 'dhPublicKey', 'profilePrivacy',
+        'encryptedPrivateKey', 'keyBackupSalt', 'keyBackupIv', 'vaultVersion'
+      ]
     });
-    res.json(updatedUser);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to update profile' });
+    res.status(500).json({ error: 'Failed to fetch me' });
   }
 };
 
 exports.getProfile = async (req, res) => {
   try {
-    const targetUserId = req.params.id;
+    const targetUserId = req.params.id || req.params.userId;
     const requesterId = req.userId;
 
     const user = await User.findByPk(targetUserId, {
@@ -192,45 +280,123 @@ exports.getProfile = async (req, res) => {
 
     res.json(baseProfile);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 };
 
-// ── Pinned Chats ─────────────────────────────────────────────────────────────
+exports.updateProfile = async (req, res) => {
+  try {
+    const { displayName, fullName, bio, phoneNumber, profilePrivacy, themeColor } = req.body;
+    const updateData = {};
+    if (displayName !== undefined) updateData.displayName = displayName;
+    if (fullName !== undefined) updateData.fullName = fullName;
+    if (bio !== undefined) updateData.bio = bio;
+    if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
+    if (profilePrivacy !== undefined) updateData.profilePrivacy = profilePrivacy;
+    if (themeColor !== undefined) updateData.themeColor = themeColor;
 
+    await User.update(updateData, { where: { id: req.userId } });
+    const updatedUser = await User.findByPk(req.userId);
+    res.json(updatedUser);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+};
+
+exports.uploadAvatar = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Không tìm thấy file ảnh' });
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    await User.update({ avatarUrl }, { where: { id: req.userId } });
+    res.json({ success: true, avatarUrl });
+  } catch (error) {
+    res.status(500).json({ error: 'Lỗi khi tải ảnh lên' });
+  }
+};
+
+exports.updatePushSubscription = async (req, res) => {
+  try {
+    const subscription = req.body;
+    await User.update({ webPushSubscription: subscription }, { where: { id: req.userId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update push subscription' });
+  }
+};
+
+// ── Vault Management ─────────────────────────────────────────────────────────
+
+exports.uploadVault = async (req, res) => {
+  try {
+    const { vaultData } = req.body;
+    if (!vaultData) return res.status(400).json({ error: 'Vault data is required' });
+    
+    const user = await User.findByPk(req.userId);
+    const newVersion = (user.vaultVersion || 0) + 1;
+    
+    await user.update({ vaultData, vaultVersion: newVersion });
+    res.json({ success: true, vaultVersion: newVersion });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to upload vault data' });
+  }
+};
+
+exports.downloadVault = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId, { attributes: ['vaultData'] });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ vaultData: user.vaultData || null });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to download vault data' });
+  }
+};
+
+// ── Block List Logic ──────────────────
+
+exports.blockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'User ID to block is required' });
+    if (userId === req.userId) return res.status(400).json({ error: 'You cannot block yourself' });
+
+    await Block.findOrCreate({ where: { blockerId: req.userId, blockedId: userId } });
+    res.json({ success: true, message: 'User blocked' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to block user' });
+  }
+};
+
+exports.unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    await Block.destroy({ where: { blockerId: req.userId, blockedId: userId } });
+    res.json({ success: true, message: 'User unblocked' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unblock user' });
+  }
+};
+
+exports.getBlockedUsers = async (req, res) => {
+  try {
+    const blocks = await Block.findAll({
+      where: { blockerId: req.userId },
+      include: [{ model: User, as: 'BlockedUser', attributes: ['id', 'username', 'avatarUrl'] }]
+    });
+    res.json(blocks);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch blocked users' });
+  }
+};
+
+// ── Pinned Chats (Legacy Support) ──────────────────
+// Note: Requires PinnedChat model to be in db
 exports.getPins = async (req, res) => {
   try {
+    const { PinnedChat } = require('../models');
+    if (!PinnedChat) return res.json([]);
     const pins = await PinnedChat.findAll({ where: { userId: req.userId } });
     res.json(pins);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch pins' });
-  }
-};
-
-exports.pinChat = async (req, res) => {
-  try {
-    const { targetUserId } = req.body;
-    await PinnedChat.findOrCreate({
-      where: { userId: req.userId, targetUserId }
-    });
-    res.json({ success: true });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to pin chat' });
-  }
-};
-
-exports.unpinChat = async (req, res) => {
-  try {
-    const { targetUserId } = req.params;
-    await PinnedChat.destroy({
-      where: { userId: req.userId, targetUserId }
-    });
-    res.json({ success: true });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to unpin chat' });
+    res.json([]);
   }
 };

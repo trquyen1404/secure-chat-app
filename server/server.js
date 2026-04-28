@@ -7,12 +7,22 @@ const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
 const { Server } = require('socket.io');
 const socketService = require('./services/socketService');
-const sequelize = require('./config/database');
+const db = require('./models');
 
+// ── Environment Validation ──────────────────────────────────────────
 dotenv.config();
 
-if (!process.env.JWT_SECRET) {
-  console.error('FATAL: JWT_SECRET environment variable is not set. Refusing to start.');
+const REQUIRED_ENV = [
+  'JWT_SECRET', 
+  'JWT_REFRESH_SECRET', 
+  'DATABASE_URL', 
+  'ALLOWED_ORIGINS', 
+  'NODE_ENV'
+];
+
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length > 0) {
+  console.error(`FATAL: Missing required environment variables: ${missingEnv.join(', ')}`);
   process.exit(1);
 }
 
@@ -44,11 +54,14 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.use(express.json({ limit: '10mb' }));
+// [Security] Relaxed limit to support "Omnipotent Vault" syncing (Bundled Message History)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.static('public'));
 
 app.use('/api', rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 1000,
+  max: 5000, // Increased for development/testing
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau 1 phút.' },
@@ -56,7 +69,7 @@ app.use('/api', rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 200, 
+  max: 1000, // Increased for development/testing
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Quá nhiều lần đăng nhập. Vui lòng thử lại sau.' },
@@ -69,6 +82,7 @@ app.use('/api/groups', require('./routes/groupRoutes'));
 app.use('/api/messages', require('./routes/messageRoutes'));
 app.use('/api/stories', require('./routes/storyRoutes'));
 app.use('/api/push', require('./routes/pushRoutes'));
+app.use('/api/attendance', require('./routes/attendanceRoutes'));
 
 app.get('/', (req, res) => res.send('Secure Chat API running'));
 
@@ -78,6 +92,7 @@ app.use((err, req, res, next) => {
 });
 
 const io = new Server(server, {
+  maxHttpBufferSize: 1e7, // 10MB limit for E2EE file attachments
   cors: {
     origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
@@ -86,7 +101,7 @@ const io = new Server(server, {
 });
 socketService(io);
 
-sequelize.sync({})
+db.sequelize.sync({})
   .then(() => console.log(`PostgreSQL synced (mode: ${process.env.NODE_ENV || 'development'})`))
   .catch(err => { console.error('Database sync error:', err); process.exit(1); });
 

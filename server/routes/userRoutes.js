@@ -1,25 +1,33 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
-const { authenticateToken } = require('../middleware/auth');
-const upload = require('../middleware/upload');
+const auth = require('../middleware/auth');
 
-// Public routes
-router.post('/register', userController.register);
-router.post('/login', userController.login);
+// Profile & Me
+router.get('/me', auth, userController.getMe);
+router.get('/profile', auth, userController.getMe); // Alias for legacy/mobile support
+router.get('/search', auth, userController.searchUsers);
+router.get('/contacts', auth, userController.getUsers); // Map contacts to getUsers
+router.get('/:id', auth, userController.getProfile);
+router.put('/profile', auth, userController.updateProfile);
+router.post('/avatar', auth, userController.uploadAvatarMiddleware, userController.uploadAvatar);
 
-// Private routes (Cần token)
-router.get('/me', authenticateToken, userController.getMe);
-router.get('/contacts', authenticateToken, userController.getContacts);
-router.get('/search', authenticateToken, userController.searchUsers);
-router.get('/:id', authenticateToken, userController.getUserProfile);
+// PreKeys & X3DH
+router.get('/:userId/prekey-bundle', auth, userController.getPreKeyBundle);
+router.post('/prekeys', auth, userController.updatePreKeys);
+router.post('/opks', auth, userController.uploadOpks);
+router.delete('/opks', auth, userController.clearPreKeys);
 
-// Routes phục vụ X3DH Handshake
-router.get('/:id/prekey-bundle', authenticateToken, userController.getPreKeyBundle);
-router.post('/update-prekeys', authenticateToken, userController.updatePreKeys);
+// Vault Sync
+router.post('/vault', auth, userController.uploadVault);
+router.get('/vault', auth, userController.downloadVault);
 
-// Cập nhật profile & Push notification
-router.put('/profile', authenticateToken, upload.single('avatar'), userController.updateProfile);
-router.post('/push-subscription', authenticateToken, userController.updatePushSubscription);
+// Block List
+router.post('/block', auth, userController.blockUser);
+router.post('/unblock', auth, userController.unblockUser);
+router.get('/blocked', auth, userController.getBlockedUsers);
+
+// Push Notifications
+router.post('/push-subscription', auth, userController.updatePushSubscription);
 
 module.exports = router;

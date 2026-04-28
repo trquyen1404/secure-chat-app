@@ -68,6 +68,7 @@ export const authApi = {
   login: (data) => api.post('/api/auth/login', data, { withCredentials: true }),
   register: (data) => api.post('/api/auth/register', data, { withCredentials: true }),
   logout: () => api.post('/api/auth/logout', {}, { withCredentials: true }),
+  uploadOpks: (data) => api.post('/api/users/opks', data),
 };
 
 export default api;

@@ -1,7 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const Group = require('./Group');
-const GroupMember = require('./GroupMember');
 
 const User = sequelize.define('User', {
   id: {
@@ -18,6 +16,22 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  displayName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  fullName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  bio: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  phoneNumber: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   publicKey: {
     type: DataTypes.TEXT,
     allowNull: false,
@@ -25,6 +39,10 @@ const User = sequelize.define('User', {
   dhPublicKey: {
     type: DataTypes.TEXT,
     allowNull: false,
+  },
+  ecPublicKey: {
+    type: DataTypes.TEXT,
+    allowNull: true,
   },
   avatarUrl: {
     type: DataTypes.STRING,
@@ -58,18 +76,6 @@ const User = sequelize.define('User', {
     type: DataTypes.INTEGER,
     defaultValue: 0,
   },
-  fullName: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  bio: {
-    type: DataTypes.TEXT,
-    allowNull: true,
-  },
-  phoneNumber: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
   profilePrivacy: {
     type: DataTypes.ENUM('public', 'friends', 'private'),
     defaultValue: 'public',
@@ -78,15 +84,30 @@ const User = sequelize.define('User', {
     type: DataTypes.JSONB,
     allowNull: true,
   },
-  ecPublicKey: {
-    type: DataTypes.TEXT,
+  vaultData: {
+    type: DataTypes.TEXT('long'),
     allowNull: true,
-  }
+  },
+  vaultVersion: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1,
+  },
 }, {
   timestamps: true,
 });
 
-User.hasMany(GroupMember, { foreignKey: 'userId', as: 'GroupMembers' });
-User.belongsToMany(Group, { through: GroupMember, foreignKey: 'userId', otherKey: 'groupId', as: 'Groups' });
+User.associate = (models) => {
+  User.hasMany(models.GroupMember, { foreignKey: 'userId', as: 'GroupMembers' });
+  User.belongsToMany(models.Group, { through: models.GroupMember, foreignKey: 'userId', otherKey: 'groupId', as: 'Groups' });
+  User.hasMany(models.Block, { foreignKey: 'blockerId', as: 'BlockedUsers' });
+  User.hasMany(models.Block, { foreignKey: 'blockedId', as: 'Blockers' });
+  
+  // Previously from Message.js
+  User.hasMany(models.Message, { as: 'SentMessages', foreignKey: 'senderId' });
+  User.hasMany(models.Message, { as: 'ReceivedMessages', foreignKey: 'recipientId' });
+  
+  // Previously from PreKey.js
+  User.hasMany(models.PreKey, { foreignKey: 'userId', as: 'PreKeys' });
+};
 
 module.exports = User;

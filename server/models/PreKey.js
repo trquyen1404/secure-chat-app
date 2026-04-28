@@ -1,6 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
-const User = require('./User');
 
 const PreKey = sequelize.define('PreKey', {
   id: {
@@ -11,7 +10,6 @@ const PreKey = sequelize.define('PreKey', {
   userId: {
     type: DataTypes.UUID,
     allowNull: false,
-    references: { model: User, key: 'id' }
   },
   publicKey: {
     type: DataTypes.TEXT,
@@ -28,12 +26,13 @@ const PreKey = sequelize.define('PreKey', {
   isUsed: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
-  }
+  },
 }, {
   timestamps: true,
 });
 
-User.hasMany(PreKey, { foreignKey: 'userId', as: 'PreKeys' });
-PreKey.belongsTo(User, { foreignKey: 'userId' });
+PreKey.associate = (models) => {
+  PreKey.belongsTo(models.User, { foreignKey: 'userId' });
+};
 
 module.exports = PreKey;
