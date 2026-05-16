@@ -87,7 +87,7 @@ exports.getUsers = async (req, res) => {
           ]
         } 
       },
-      attributes: ['id', 'username', 'displayName', 'online', 'avatarUrl', 'themeColor', 'lastSeenAt', 'publicKey', 'dhPublicKey']
+      attributes: ['id', 'username', 'displayName', 'online', 'avatarUrl', 'themeColor', 'lastSeenAt', 'publicKey', 'dhPublicKey', 'studentId', 'teacherId', 'phone']
     });
 
     // Attach latest message for each user
@@ -151,12 +151,51 @@ exports.uploadAvatar = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    const { displayName, bio } = req.body;
-    await User.update({ displayName, bio }, { where: { id: req.userId } });
-    res.json({ success: true, displayName, bio });
+    const { displayName, bio, studentId, teacherId, phone } = req.body;
+    await User.update({ displayName, bio, studentId, teacherId, phone }, { where: { id: req.userId } });
+    res.json({ success: true, displayName, bio, studentId, teacherId, phone });
   } catch (error) {
     console.error('[updateProfile]', error);
     res.status(500).json({ error: 'Lỗi khi cập nhật hồ sơ' });
+  }
+};
+
+exports.searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query || query.length < 2) return res.json([]);
+
+    const currentUserId = req.userId;
+    const blocks = await Block.findAll({
+      where: { [Op.or]: [{ blockerId: currentUserId }, { blockedId: currentUserId }] },
+      raw: true
+    });
+    const blockedIds = blocks.map(b => b.blockerId === currentUserId ? b.blockedId : b.blockerId);
+
+    const users = await User.findAll({
+      where: {
+        [Op.and]: [
+          { id: { [Op.ne]: currentUserId } },
+          { id: { [Op.notIn]: blockedIds } },
+          {
+            [Op.or]: [
+              { username: { [Op.iLike]: `%${query}%` } },
+              { displayName: { [Op.iLike]: `%${query}%` } },
+              { studentId: { [Op.iLike]: `%${query}%` } },
+              { teacherId: { [Op.iLike]: `%${query}%` } },
+              { phone: { [Op.iLike]: `%${query}%` } },
+            ]
+          }
+        ]
+      },
+      attributes: ['id', 'username', 'displayName', 'avatarUrl', 'studentId', 'teacherId', 'phone', 'online', 'role'],
+      limit: 20
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('[searchUsers]', error);
+    res.status(500).json({ error: 'Lỗi khi tìm kiếm người dùng' });
   }
 };
 
@@ -316,7 +355,8 @@ exports.getProfile = async (req, res) => {
       attributes: [
         'id', 'username', 'displayName', 'bio', 'avatarUrl', 'themeColor', 
         'online', 'lastSeenAt', 'publicKey', 'dhPublicKey',
-        'encryptedPrivateKey', 'keyBackupSalt', 'keyBackupIv', 'vaultVersion'
+        'encryptedPrivateKey', 'keyBackupSalt', 'keyBackupIv', 'vaultVersion',
+        'studentId', 'teacherId', 'phone', 'role'
       ] 
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -335,5 +375,25 @@ exports.clearPreKeys = async (req, res) => {
   } catch (error) {
     console.error('[clearPreKeys]', error);
     res.status(500).json({ error: 'Failed to clear PreKeys' });
+  }
+};
+
+exports.updateFolders = async (req, res) => {
+  try {
+    const { folders } = req.body;
+    if (!Array.isArray(folders)) return res.status(400).json({ error: 'Folders must be an array' });
+    await User.update({ folders }, { where: { id: req.userId } });
+    res.json({ success: true, folders });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update folders' });
+  }
+};
+
+exports.getFolders = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId, { attributes: ['folders'] });
+    res.json(user.folders || []);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch folders' });
   }
 };

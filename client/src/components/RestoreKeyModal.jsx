@@ -136,71 +136,80 @@ const RestoreKeyModal = () => {
   if (!needsPassphraseRestore) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in transition-all">
-      <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden transition-all duration-300">
-        <div className="p-8">
-          <div className="flex flex-col items-center mb-6">
-            <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-4 transition-colors ${user.vaultVersion > 1 ? 'bg-amber-500/10' : 'bg-blue-500/10'}`}>
-              {user.vaultVersion > 1 ? <RefreshCw className="w-8 h-8 text-amber-500 animate-spin-slow" /> : <ShieldCheck className="w-8 h-8 text-blue-500" />}
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-slate-100">
-              {user.vaultVersion > 1 ? 'Cập nhật Két sắt' : 'Khôi phục Két sắt'}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-slate-400 text-center mt-2 px-4 transition-colors">
-              {user.vaultVersion > 1 
-                ? "Mật khẩu của bạn đã được thay đổi từ một thiết bị khác. Vui lòng nhập mật khẩu mới để tiếp tục." 
-                : "Thiết bị mới phát hiện. Vui lòng nhập mật khẩu khôi phục để dải mã tin nhắn của bạn."
-              }
-            </p>
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-xl animate-fade-in">
+      {/* Background Decor */}
+      <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-amber-500/10 rounded-full blur-[100px] animate-pulse"></div>
+      <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-indigo-500/10 rounded-full blur-[100px] animate-pulse [animation-delay:1.5s]"></div>
+
+      <div className="relative z-10 w-full max-w-md glass p-10 rounded-[40px] premium-shadow border-[var(--glass-border)] animate-scale-in">
+        <div className="flex flex-col items-center mb-10 text-center">
+          <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-6 shadow-2xl transition-all duration-500 ${user.vaultVersion > 1 ? 'bg-amber-500/20 text-amber-500' : 'bg-indigo-500/20 text-indigo-500'}`}>
+            {user.vaultVersion > 1 ? <RefreshCw className="w-10 h-10 animate-spin-slow" /> : <ShieldCheck className="w-10 h-10" />}
+          </div>
+          
+          <h3 className="text-3xl font-black text-[var(--text-primary)] tracking-tight mb-3">
+            {user.vaultVersion > 1 ? 'Cập nhật Két sắt' : 'Mở khóa Két sắt'}
+          </h3>
+          <p className="text-[14px] text-[var(--text-secondary)] font-medium leading-relaxed px-2">
+            {user.vaultVersion > 1 
+              ? "Mật khẩu của bạn đã được thay đổi. Vui lòng xác thực mật khẩu mới để tiếp tục phiên bản bảo mật mới." 
+              : "Phát hiện thiết bị mới. Vui lòng nhập mật khẩu khôi phục để giải mã toàn bộ lịch sử tin nhắn của bạn."
+            }
+          </p>
+        </div>
+
+        <form onSubmit={handleRestore} className="space-y-8">
+          <div className="space-y-3">
+            <label className="text-[13px] font-bold text-[var(--text-secondary)] ml-1 uppercase tracking-wider">Passphrase Bảo mật</label>
+            <input
+              type="password"
+              required
+              autoFocus
+              className="w-full px-5 py-4 bg-[var(--input-bg)] border border-transparent rounded-2xl focus:border-amber-500/30 focus:bg-[var(--bg-secondary)] focus:ring-4 focus:ring-amber-500/10 outline-none transition-all duration-300 text-[var(--text-primary)] font-medium placeholder-[var(--text-secondary)]/50"
+              placeholder="Nhập khóa khôi phục 8+ ký tự..."
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              disabled={loading}
+            />
           </div>
 
-          <form onSubmit={handleRestore} className="space-y-4">
-            <div>
-              <input
-                type="password"
-                required
-                autoFocus
-                className="w-full px-4 py-3.5 bg-white dark:bg-slate-800/50 border border-gray-300 dark:border-slate-700/50 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none transition-all text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-gray-500"
-                placeholder="Nhập Mật khẩu khôi phục (8+ ký tự)"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-                disabled={loading}
-              />
-            </div>
-
-            {loading && (
-              <div className="space-y-2">
-                <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-amber-500 transition-all duration-300 ease-out"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-center text-amber-500 font-bold uppercase tracking-widest animate-pulse">
-                  {progress < 20 ? 'Đang kết nối...' : progress < 60 ? 'Đang dải mã Két sắt...' : 'Đang khôi phục lịch sử...'}
+          {loading && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="h-2 w-full bg-[var(--bg-accent)] rounded-full overflow-hidden border border-[var(--border)]">
+                <div 
+                  className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <div className="flex justify-between items-center px-1">
+                <p className="text-[11px] text-amber-500 font-black uppercase tracking-widest animate-pulse">
+                  {progress < 20 ? 'Kết nối...' : progress < 60 ? 'Giải mã Két sắt...' : 'Đang khôi phục...'}
                 </p>
+                <span className="text-[11px] font-bold text-amber-500">{Math.round(progress)}%</span>
               </div>
-            )}
+            </div>
+          )}
 
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-3 transition-all animate-shake">
-                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                <p className="text-xs text-red-600 dark:text-red-400 leading-relaxed font-medium">{error}</p>
-              </div>
-            )}
+          {error && (
+            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3 animate-shake">
+              <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-500 leading-relaxed font-bold">{error}</p>
+            </div>
+          )}
 
+          <div className="space-y-3">
             <button
               type="submit"
               disabled={loading || passphrase.length < 8}
-              className="w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg shadow-amber-900/20 transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+              className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-2xl font-bold text-lg shadow-xl shadow-amber-500/20 transition-all duration-300 flex items-center justify-center gap-3 group disabled:opacity-50 disabled:hover:scale-100 hover:scale-[1.02] active:scale-[0.98]"
             >
               {loading ? (
                 <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Đang xử lý...
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  Đang xác thực...
                 </>
               ) : (
-                'Mở khóa Két sắt'
+                'Kích hoạt Khôi phục'
               )}
             </button>
 
@@ -208,16 +217,16 @@ const RestoreKeyModal = () => {
               type="button"
               onClick={logout}
               disabled={loading}
-              className="w-full py-2.5 text-xs text-gray-500 dark:text-slate-500 hover:text-red-400 transition-colors uppercase tracking-widest font-bold"
+              className="w-full py-3 text-[11px] text-[var(--text-secondary)] hover:text-red-500 transition-colors uppercase tracking-[0.2em] font-black"
             >
-              Hủy và Đăng xuất
+              Hủy bỏ và Đăng xuất
             </button>
-          </form>
-        </div>
+          </div>
+        </form>
 
-        <div className="bg-gray-50 dark:bg-slate-950/50 p-4 border-t border-gray-100 dark:border-slate-800/50">
-          <p className="text-[10px] text-gray-400 dark:text-slate-500 leading-relaxed text-center italic transition-colors">
-            Khóa bí mật của bạn được mã hóa hoàn toàn. Chúng tôi không bao giờ lưu trữ mật khẩu khôi phục của bạn trên máy chủ.
+        <div className="mt-10 pt-8 border-t border-[var(--border)]">
+          <p className="text-[10px] text-[var(--text-secondary)]/60 leading-relaxed text-center font-medium italic">
+            🛡️ Khóa bí mật của bạn được bảo vệ bởi giao thức AES-256. <br/> Chúng tôi không bao giờ có thể truy cập vào khóa này.
           </p>
         </div>
       </div>

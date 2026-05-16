@@ -12,7 +12,15 @@ exports.createGroup = async (req, res) => {
     const creatorId = req.userId;
     if (!name) return res.status(400).json({ error: 'Group name required' });
 
-    const group = await Group.create({ name, avatarUrl: avatarUrl || null, createdBy: creatorId });
+    // Generate random 6-character code
+    const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    const group = await Group.create({ 
+      name, 
+      avatarUrl: avatarUrl || null, 
+      createdBy: creatorId,
+      inviteCode 
+    });
 
     const allMemberIds = Array.from(new Set([creatorId, ...(memberIds || [])]));
 
@@ -23,7 +31,13 @@ exports.createGroup = async (req, res) => {
     }));
     await GroupMember.bulkCreate(memberRows);
 
-    res.status(201).json({ id: group.id, name: group.name, avatarUrl: group.avatarUrl, createdBy: group.createdBy });
+    res.status(201).json({ 
+      id: group.id, 
+      name: group.name, 
+      avatarUrl: group.avatarUrl, 
+      createdBy: group.createdBy,
+      inviteCode: group.inviteCode
+    });
   } catch (err) {
     console.error('createGroup error', err);
     res.status(500).json({ error: 'Failed to create group' });
@@ -61,7 +75,7 @@ exports.getGroupMessages = async (req, res) => {
 
     const messages = await GroupMessage.findAll({
       where: whereClause,
-      attributes: ['id', 'groupId', 'senderId', 'encryptedContent', 'ratchetKey', 'n', 'pn', 'iv', 'signature', 'type', 'localId', 'createdAt'],
+      attributes: ['id', 'groupId', 'senderId', 'encryptedContent', 'ratchetKey', 'n', 'pn', 'iv', 'signature', 'type', 'localId', 'isPinned', 'expiresAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit
     });
@@ -152,7 +166,7 @@ exports.getUserGroups = async (req, res) => {
       include: [{ 
         model: Group, 
         as: 'Group',
-        attributes: ['id', 'name', 'avatarUrl', 'createdBy', 'createdAt']
+        attributes: ['id', 'name', 'avatarUrl', 'createdBy', 'createdAt', 'themeColor', 'quickEmoji', 'selfDestructTimer']
       }]
     });
     
@@ -181,6 +195,55 @@ exports.getUserGroups = async (req, res) => {
   } catch (err) {
     console.error('[getUserGroups]', err);
     res.status(500).json({ error: 'Failed to fetch user groups' });
+  }
+};
+
+/** Join a group via invite code */
+exports.joinByCode = async (req, res) => {
+  try {
+    const { inviteCode } = req.body;
+    if (!inviteCode) return res.status(400).json({ error: 'Vui lòng nhập mã mời' });
+
+    const group = await Group.findOne({ where: { inviteCode } });
+    if (!group) return res.status(404).json({ error: 'Mã mời không hợp lệ hoặc nhóm không tồn tại' });
+
+    const existingMember = await GroupMember.findOne({ where: { groupId: group.id, userId: req.userId } });
+    if (existingMember) return res.status(400).json({ error: 'Bạn đã là thành viên của nhóm này' });
+
+    await GroupMember.create({
+      groupId: group.id,
+      userId: req.userId,
+      role: 'member',
+    });
+
+    res.json({ message: 'Tham gia nhóm thành công', group });
+  } catch (err) {
+    console.error('[joinByCode]', err);
+    res.status(500).json({ error: 'Lỗi khi tham gia nhóm' });
+  }
+};
+
+/** Toggle Mute All (Only Admin) */
+exports.toggleMute = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { isMuted } = req.body;
+    
+    const member = await GroupMember.findOne({ where: { groupId, userId: req.userId } });
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ error: 'Chỉ Quản trị viên mới được thay đổi cài đặt này' });
+    }
+
+    const group = await Group.findByPk(groupId);
+    if (!group) return res.status(404).json({ error: 'Không tìm thấy nhóm' });
+
+    group.isMuted = isMuted;
+    await group.save();
+
+    res.json({ message: `Đã ${isMuted ? 'khóa' : 'mở khóa'} tính năng chat của sinh viên.`, isMuted });
+  } catch (err) {
+    console.error('[toggleMute]', err);
+    res.status(500).json({ error: 'Lỗi khi thay đổi cài đặt nhóm' });
   }
 };
 
@@ -282,10 +345,10 @@ exports.updateGroupSettings = async (req, res) => {
     const group = await Group.findByPk(groupId);
     if (!group) return res.status(404).json({ error: 'Group not found' });
 
-    // Admin check
+    // Allow any member to update group settings for better collaboration (Signal-style)
     const membership = await GroupMember.findOne({ where: { groupId, userId: req.userId } });
-    if (membership?.role !== 'admin' && String(group.createdBy) !== String(req.userId)) {
-      return res.status(403).json({ error: 'Only admins can change group settings' });
+    if (!membership) {
+      return res.status(403).json({ error: 'You must be a member of this group' });
     }
 
     if (themeColor) group.themeColor = themeColor;
@@ -325,5 +388,67 @@ exports.updateMemberSettings = async (req, res) => {
   } catch (err) {
     console.error('[updateMemberSettings] Error:', err);
     res.status(500).json({ error: 'Failed to update member settings' });
+  }
+};
+/** Toggle pin status for a group message (Admin only) */
+exports.togglePinGroupMessage = async (req, res) => {
+  try {
+    const { groupId, messageId } = req.params;
+    const msg = await GroupMessage.findByPk(messageId);
+    if (!msg || msg.groupId !== groupId) return res.status(404).json({ error: 'Message not found' });
+
+    // Admin check
+    const membership = await GroupMember.findOne({ where: { groupId, userId: req.userId } });
+    if (membership?.role !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can pin messages' });
+    }
+
+    await msg.update({ isPinned: !msg.isPinned });
+    res.json({ messageId, isPinned: msg.isPinned });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to pin' });
+  }
+};
+
+/** Get all pinned messages in a group */
+exports.getPinnedGroupMessages = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const messages = await GroupMessage.findAll({
+      where: { groupId, isPinned: true },
+      order: [['createdAt', 'DESC']]
+    });
+    res.json(messages);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch pinned messages' });
+  }
+};
+
+/** Get read status (lastReadMessageId) for all group members */
+exports.getReadStatus = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const members = await GroupMember.findAll({
+      where: { groupId },
+      include: [
+        { 
+          model: User, 
+          as: 'User', 
+          attributes: ['id', 'username', 'avatarUrl', 'displayName'] 
+        },
+        {
+          model: User.sequelize.models.GroupMessage,
+          as: 'LastReadMessage',
+          attributes: ['createdAt']
+        }
+      ],
+      attributes: ['userId', 'lastReadMessageId']
+    });
+    res.json(members);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 };

@@ -13,13 +13,16 @@ const {
   updateProfile,
   uploadAvatar,
   uploadAvatarMiddleware,
-  clearPreKeys
+  clearPreKeys,
+  updateFolders,
+  getFolders
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
 
 router.get('/', auth, getUsers);
+router.get('/search', auth, require('../controllers/userController').searchUsers);
 router.get('/:userId/prekey-bundle', auth, getPreKeyBundle);
 router.post('/prekeys', auth, uploadPreKeys);
 router.post('/opks', auth, uploadOpks);
@@ -35,5 +38,7 @@ router.put('/profile', auth, updateProfile);
 router.post('/avatar', auth, uploadAvatarMiddleware, uploadAvatar);
 
 router.delete('/opks', auth, clearPreKeys);
+router.get('/folders', auth, getFolders);
+router.post('/folders', auth, updateFolders);
 
 module.exports = router;

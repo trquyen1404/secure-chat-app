@@ -40,6 +40,39 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
+    validate: {
+      isEmail: true,
+    }
+  },
+  role: {
+    type: DataTypes.STRING,
+    defaultValue: 'student', // 'student', 'teacher', 'admin'
+    allowNull: false,
+  },
+  isVerified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  verificationToken: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  verificationTokenExpires: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  isBanned: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  banReason: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   lastSeenAt: {
     type: DataTypes.DATE,
     allowNull: true,
@@ -71,6 +104,33 @@ const User = sequelize.define('User', {
   vaultVersion: {
     type: DataTypes.INTEGER,
     defaultValue: 1,
+  },
+  folders: {
+    type: DataTypes.JSONB,
+    defaultValue: [], // [{ id, name, chatIds: [] }]
+  },
+  points: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
+  badges: {
+    type: DataTypes.JSONB,
+    defaultValue: [], // Array of badge keys: ['attendance_king', 'fast_learner']
+  },
+  studentId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
+  },
+  teacherId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
+  },
+  phone: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
   },
 }, {
   timestamps: true,

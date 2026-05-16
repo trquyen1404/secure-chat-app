@@ -13,12 +13,20 @@ const auth = async (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     
     // [Security Hardening] Verify tokenVersion to support global logout/revocation
-    const user = await User.findByPk(decoded.userId, { attributes: ['id', 'tokenVersion'] });
+    const user = await User.findByPk(decoded.userId, { 
+      attributes: ['id', 'role', 'tokenVersion', 'isBanned', 'banReason'] 
+    });
+    
     if (!user || user.tokenVersion !== decoded.tokenVersion) {
       return res.status(401).json({ error: 'Token đã bị thu hồi hoặc phiên đã đổi. Vui lòng đăng nhập lại.' });
     }
 
-    req.userId = decoded.userId;
+    if (user.isBanned) {
+      return res.status(403).json({ error: 'Tài khoản của bạn đã bị khóa', reason: user.banReason });
+    }
+
+    req.userId = user.id;
+    req.user = user; // Full user context for RBAC
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

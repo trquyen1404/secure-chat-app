@@ -6,6 +6,9 @@ import { ThemeProvider } from './context/ThemeContext.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { SocketProvider } from './context/SocketContext.jsx';
 import { CallProvider } from './context/CallContext.jsx';
+import { registerServiceWorker } from './utils/pushNotifications';
+
+registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
     <ThemeProvider>

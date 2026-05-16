@@ -44,6 +44,7 @@ const GroupMember = sequelize.define('GroupMember', {
 GroupMember.associate = (models) => {
   GroupMember.belongsTo(models.User, { foreignKey: 'userId', as: 'User' });
   GroupMember.belongsTo(models.Group, { foreignKey: 'groupId', as: 'Group' });
+  GroupMember.belongsTo(models.GroupMessage, { foreignKey: 'lastReadMessageId', as: 'LastReadMessage' });
 };
 
 module.exports = GroupMember;

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, X, User as UserIcon, FileText, Loader2 } from 'lucide-react';
+import { Camera, X, User as UserIcon, FileText, Loader2, Smartphone, ShieldAlert } from 'lucide-react';
 import api from '../utils/axiosConfig';
 import { useAuth } from '../context/AuthContext';
 
@@ -7,6 +7,9 @@ const ProfileModal = ({ isOpen, onClose }) => {
   const { user, updateUser } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [bio, setBio] = useState(user?.bio || '');
+  const [studentId, setStudentId] = useState(user?.studentId || '');
+  const [teacherId, setTeacherId] = useState(user?.teacherId || '');
+  const [phone, setPhone] = useState(user?.phone || '');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
@@ -16,6 +19,9 @@ const ProfileModal = ({ isOpen, onClose }) => {
     if (isOpen) {
       setDisplayName(user?.displayName || '');
       setBio(user?.bio || '');
+      setStudentId(user?.studentId || '');
+      setTeacherId(user?.teacherId || '');
+      setPhone(user?.phone || '');
     }
   }, [isOpen, user]);
 
@@ -53,8 +59,8 @@ const ProfileModal = ({ isOpen, onClose }) => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put('/api/users/profile', { displayName, bio });
-      const updatedUser = { ...user, displayName, bio };
+      await api.put('/api/users/profile', { displayName, bio, studentId, teacherId, phone });
+      const updatedUser = { ...user, displayName, bio, studentId, teacherId, phone };
       updateUser(updatedUser);
       onClose();
     } catch (err) {
@@ -65,32 +71,51 @@ const ProfileModal = ({ isOpen, onClose }) => {
     }
   };
 
+  const handleRevokeDevices = async () => {
+    if (!window.confirm('Bạn có chắc chắn muốn ĐĂNG XUẤT khỏi TẤT CẢ các thiết bị khác không? (Bạn vẫn sẽ duy trì đăng nhập trên thiết bị này)')) {
+      return;
+    }
+    
+    try {
+      const res = await api.post('/api/auth/revoke-all');
+      alert(res.data.message || 'Đã đăng xuất thành công khỏi tất cả các thiết bị khác.');
+    } catch (err) {
+      console.error('Revoke failed', err);
+      alert('Không thể thực hiện yêu cầu: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-xl animate-fade-in">
+      <div className="relative w-full max-w-md glass rounded-[40px] premium-shadow border-[var(--glass-border)] overflow-hidden animate-scale-in">
         {/* Header */}
-        <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50/50 dark:bg-slate-800/30">
-          <h2 className="text-xl font-bold text-gray-800 dark:text-white">Cập nhật Hồ sơ</h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 dark:hover:bg-slate-800 rounded-full transition-colors text-gray-500">
+        <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-white/5">
+          <div className="flex flex-col">
+            <h2 className="text-xl font-black text-[var(--text-primary)] tracking-tight">Hồ sơ cá nhân</h2>
+            <p className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-[0.2em]">Cá nhân hóa tài khoản</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-all duration-300 text-[var(--text-secondary)] hover:text-red-500">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-8 space-y-8">
+        <div className="p-6 space-y-6">
           {/* Avatar Section */}
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center">
             <div className="relative group">
-              <div className="w-28 h-28 rounded-full border-4 border-indigo-500/20 overflow-hidden bg-gray-100 dark:bg-slate-800 flex items-center justify-center">
-                {user?.avatarUrl ? (
-                  <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-4xl font-bold text-indigo-500">{user?.username?.[0]?.toUpperCase()}</span>
-                )}
+              <div className="w-24 h-24 rounded-[32px] p-1 premium-gradient shadow-xl shadow-indigo-500/20 transition-transform duration-500">
+                <div className="w-full h-full rounded-[28px] overflow-hidden bg-[var(--bg-secondary)] flex items-center justify-center border-4 border-[var(--bg-primary)]">
+                  {user?.avatarUrl ? (
+                    <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-4xl font-black text-indigo-500">{user?.username?.[0]?.toUpperCase()}</span>
+                  )}
+                </div>
               </div>
               <button 
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="absolute bottom-0 right-0 p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-all transform hover:scale-110 disabled:opacity-50"
+                className="absolute -bottom-1 -right-1 w-10 h-10 premium-gradient text-white rounded-xl shadow-lg transition-all transform hover:scale-110 flex items-center justify-center border-2 border-[var(--bg-primary)]"
               >
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
               </button>
@@ -102,53 +127,108 @@ const ProfileModal = ({ isOpen, onClose }) => {
                 accept="image/*"
               />
             </div>
-            <p className="text-xs text-gray-500 dark:text-slate-500">Tối đa 5MB. Định dạng: JPG, PNG, WEBP</p>
+            <p className="mt-3 text-[9px] font-black text-[var(--text-secondary)]/50 uppercase tracking-widest text-center">JPG, PNG hoặc WEBP (Max 5MB)</p>
           </div>
 
           {/* Form Fields */}
-          <div className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-gray-700 dark:text-slate-300 flex items-center gap-2">
-                <UserIcon className="w-4 h-4 text-indigo-500" /> Tên hiển thị
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-[var(--text-secondary)] ml-1 uppercase tracking-widest flex items-center gap-2">
+                <UserIcon className="w-3 h-3 text-indigo-500" /> Tên hiển thị
               </label>
               <input 
                 type="text"
-                placeholder="Ví dụ: Anh Tú"
-                className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 dark:text-white transition-all shadow-sm"
+                placeholder="Nhập tên mới..."
+                className="w-full px-4 py-3 bg-[var(--input-bg)] border border-transparent rounded-xl focus:border-[var(--primary)]/30 focus:bg-[var(--bg-secondary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300 text-sm font-bold placeholder-[var(--text-secondary)]/30"
                 value={displayName}
                 onChange={e => setDisplayName(e.target.value)}
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-gray-700 dark:text-slate-300 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-indigo-500" /> Bio (Giới thiệu ngắn)
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-[var(--text-secondary)] ml-1 uppercase tracking-widest flex items-center gap-2">
+                <FileText className="w-3 h-3 text-indigo-500" /> Tiểu sử cá nhân
               </label>
               <textarea 
-                rows="3"
+                rows="2"
                 placeholder="Một chút về bản thân bạn..."
-                className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 dark:text-white transition-all shadow-sm resize-none"
+                className="w-full px-4 py-3 bg-[var(--input-bg)] border border-transparent rounded-xl focus:border-[var(--primary)]/30 focus:bg-[var(--bg-secondary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300 text-sm font-bold placeholder-[var(--text-secondary)]/30 resize-none"
                 value={bio}
                 onChange={e => setBio(e.target.value)}
               />
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest">Mã Sinh Viên</label>
+                <input 
+                  type="text" 
+                  value={studentId} 
+                  onChange={e => setStudentId(e.target.value)}
+                  className="w-full px-4 py-3 bg-[var(--input-bg)] rounded-xl text-xs font-bold focus:ring-2 ring-indigo-500/20 outline-none"
+                  placeholder="VD: 71DCTT..."
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-[var(--text-secondary)] uppercase tracking-widest">Mã Giáo Viên</label>
+                <input 
+                  type="text" 
+                  value={teacherId} 
+                  onChange={e => setTeacherId(e.target.value)}
+                  className="w-full px-4 py-3 bg-[var(--input-bg)] rounded-xl text-xs font-bold focus:ring-2 ring-orange-500/20 outline-none"
+                  placeholder="Dành cho GV..."
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-[var(--text-secondary)] ml-1 uppercase tracking-widest flex items-center gap-2">
+                <Smartphone className="w-3 h-3 text-green-500" /> Số điện thoại
+              </label>
+              <input 
+                type="text"
+                placeholder="Nhập số điện thoại..."
+                className="w-full px-4 py-3 bg-[var(--input-bg)] border border-transparent rounded-xl focus:border-[var(--primary)]/30 focus:bg-[var(--bg-secondary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300 text-sm font-bold"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Security Section */}
+          <div className="pt-6 border-t border-[var(--border)]">
+            <h3 className="text-[11px] font-black text-red-500 ml-1 mb-4 uppercase tracking-widest flex items-center gap-2">
+              <ShieldAlert className="w-3.5 h-3.5" /> Quản lý thiết bị
+            </h3>
+            <button 
+              onClick={handleRevokeDevices}
+              className="w-full flex items-center justify-between p-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl transition-all duration-300 group"
+            >
+              <div className="flex items-center gap-3">
+                <Smartphone className="w-5 h-5 group-hover:animate-shake" />
+                <div className="text-left">
+                  <p className="font-bold text-sm">Đăng xuất tất cả thiết bị khác</p>
+                  <p className="text-[10px] font-medium opacity-70">Bảo vệ tài khoản nếu bạn quên đăng xuất</p>
+                </div>
+              </div>
+            </button>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-6 bg-gray-50/50 dark:bg-slate-800/30 border-t border-gray-100 dark:border-slate-800 flex gap-3">
+        <div className="p-5 bg-white/5 border-t border-[var(--border)] flex gap-3">
           <button 
             onClick={onClose}
-            className="flex-1 px-6 py-3 border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 font-semibold rounded-xl hover:bg-gray-100 dark:hover:bg-slate-300/5 transition-colors"
+            className="flex-1 px-4 py-3 glass text-[var(--text-primary)] font-black rounded-xl hover:bg-white/10 transition-all uppercase tracking-widest text-[10px]"
           >
-            Hủy
+            Hủy bỏ
           </button>
           <button 
             onClick={handleSave}
             disabled={saving || uploading}
-            className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+            className="flex-[1.5] px-4 py-3 premium-gradient text-white font-black rounded-xl shadow-xl shadow-indigo-500/20 hover:brightness-110 transition-all flex items-center justify-center gap-2 disabled:opacity-50 uppercase tracking-widest text-[10px]"
           >
-            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Lưu thay đổi'}
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Cập nhật'}
           </button>
         </div>
       </div>

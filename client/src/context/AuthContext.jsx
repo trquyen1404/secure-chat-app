@@ -4,6 +4,7 @@ import api, { authApi } from '../utils/axiosConfig';
 import { uploadVault } from '../utils/vaultSyncService';
 import { loadDeviceMasterKey, loadLocalVaultVersion, wipeLocalSecurity, loadWrappedVaultKey } from '../utils/localSecurityService';
 import { unwrapVaultKey } from '../utils/crypto';
+import { subscribeToNotifications } from '../utils/pushNotifications';
 
 const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
@@ -161,6 +162,12 @@ export const AuthProvider = ({ children }) => {
     setMasterKey(mKey);
     setNeedsPassphraseRestore(false);
   };
+
+  useEffect(() => {
+    if (user && token && !loading) {
+      subscribeToNotifications().catch(err => console.error('[AUTH] Push subscription failed:', err));
+    }
+  }, [user?.id, token, loading]);
 
   useEffect(() => {
     const handleForcedLogout = async () => {

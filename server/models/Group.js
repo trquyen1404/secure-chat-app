@@ -31,6 +31,15 @@ const Group = sequelize.define('Group', {
     type: DataTypes.INTEGER,
     defaultValue: 0, // 0 = disabled, else seconds
   },
+  inviteCode: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true,
+  },
+  isMuted: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
 }, {
   timestamps: true,
 });

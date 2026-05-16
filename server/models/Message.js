@@ -83,6 +83,14 @@ const Message = sequelize.define('Message', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  isPinned: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  expiresAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
 }, {
   timestamps: true,
   indexes: [

@@ -22,6 +22,7 @@ const base64Key = z.string().min(20, 'Key too short').max(512, 'Key too large');
 
 const registerSchema = z.object({
   username: z.string().min(3, 'Username must be at least 3 characters').max(50),
+  email: z.string().email('Invalid email format').regex(/@(stu\.)?utt\.edu\.vn$/, 'Must be a UTT university email'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   publicKey: base64Key,                     // ECDSA Identity Key (base64 SPKI)
   dhPublicKey: base64Key,                   // X25519 Identity DH Key (base64 Raw)

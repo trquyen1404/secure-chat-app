@@ -1,5 +1,6 @@
 const { AttendanceSession, AttendanceRecord, User, Group } = require('../models');
 const crypto = require('crypto');
+const notificationService = require('../services/notificationService');
 
 exports.createSession = async (req, res) => {
   try {
@@ -18,6 +19,15 @@ exports.createSession = async (req, res) => {
       expiresAt,
       sessionData
     });
+
+    // Notify group
+    const group = await Group.findByPk(groupId);
+    notificationService.sendGroupNotification(groupId, {
+      title: '📋 Điểm danh mới',
+      body: `Giảng viên vừa bắt đầu buổi điểm danh: ${title}`,
+      url: `/`, // Link to chat
+      tag: `attendance-${session.id}`
+    }, creatorId);
 
     res.status(201).json(session);
   } catch (error) {

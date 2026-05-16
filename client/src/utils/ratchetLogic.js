@@ -41,6 +41,10 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
       }
 
       let session = await loadSession(senderId, masterKey);
+      if (!currentUser?.id) {
+         console.warn('[E2EE-Logic] Current user profile not yet loaded. Deferring message decryption.');
+         return { content: '[Đang khởi tạo bảo mật...]', success: false };
+      }
       const localId = currentUser.id;
       const remoteId = senderId;
       const isRemoteHigher = remoteId.localeCompare(localId) > 0;
@@ -217,8 +221,14 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
         const decrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, messageKey, sessionAD);
         await saveSession(senderId, tempSession, masterKey);
         
-        // Save to local plaintext store
-        await saveDecryptedMessage(msg.id, decrypted, masterKey);
+        // Save to local plaintext store with metadata for search
+        await saveDecryptedMessage(msg.id, { 
+          text: decrypted, 
+          senderId: msg.senderId, 
+          recipientId: msg.recipientId,
+          groupId: msg.groupId || null,
+          timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()
+        }, masterKey);
 
         // PHÁT TÍN HIỆU TOÀN CẦU CHO REACT
         window.dispatchEvent(new CustomEvent('e2ee_message_synced', { 
@@ -355,7 +365,12 @@ export async function processGroupMessage(msg, masterKey, currentUser, activeGro
 
       // 4. Persist results
       if (content) {
-        await saveDecryptedMessage(msg.id, content, masterKey);
+        await saveDecryptedMessage(msg.id, {
+          text: content,
+          senderId: msg.senderId,
+          groupId: targetGroupId,
+          timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()
+        }, masterKey);
         await saveTheirSenderKey(targetGroupId, msg.senderId, res.updatedState, masterKey);
       }
 

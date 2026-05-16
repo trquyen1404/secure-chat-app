@@ -213,7 +213,7 @@ const AttendanceManager = ({ groupId, isOpen, onClose, isTeacher }) => {
               {isTeacher && (
                 <button 
                   onClick={() => setView('create')}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                  className="w-full py-3 bg-[#0054a6] hover:bg-[#003d7a] text-white rounded-xl font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
                 >
                   <QrCode className="w-5 h-5" />
                   Tạo phiên điểm danh mới
@@ -232,7 +232,7 @@ const AttendanceManager = ({ groupId, isOpen, onClose, isTeacher }) => {
 
               <button 
                 onClick={fetchGroupStats}
-                className="w-full py-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 border border-indigo-200 dark:border-indigo-500/20"
+                className="w-full py-3 bg-[var(--primary)]/5 text-[var(--primary)] rounded-xl font-semibold transition-all flex items-center justify-center gap-2 border border-[var(--primary)]/20"
               >
                 <BarChart2 className="w-5 h-5" />
                 Thống kê tương tác nhóm
@@ -284,7 +284,7 @@ const AttendanceManager = ({ groupId, isOpen, onClose, isTeacher }) => {
                                 
                                 <button 
                                   onClick={() => handleSendReport(s)}
-                                  className="flex items-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold rounded-lg transition-all shadow-md"
+                                  className="flex items-center gap-2 px-4 py-2 bg-[#f47920] hover:bg-[#d4691a] text-white text-xs font-bold rounded-lg transition-all shadow-md"
                                 >
                                   <BarChart2 className="w-4 h-4" />
                                   Gửi báo cáo vào nhóm

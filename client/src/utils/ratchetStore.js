@@ -124,7 +124,8 @@ export async function saveDecryptedMessage(id, contentOrObj, masterKey = null) {
     content, 
     timestamp: isObject ? (contentOrObj.timestamp || Date.now()) : Date.now(),
     senderId: isObject ? contentOrObj.senderId : null,
-    recipientId: isObject ? contentOrObj.recipientId : null
+    recipientId: isObject ? contentOrObj.recipientId : null,
+    groupId: isObject ? contentOrObj.groupId : null
   };
 
   if (masterKey && content) {
@@ -179,7 +180,8 @@ export async function bulkSaveMessages(messages, masterKey = null, onProgress = 
       content: finalContent, 
       timestamp: msg.timestamp || Date.now(),
       senderId: msg.senderId || null,
-      recipientId: msg.recipientId || null
+      recipientId: msg.recipientId || null,
+      groupId: msg.groupId || null
     };
 
     // If already encrypted (from vault sync), just pass it through
@@ -304,13 +306,48 @@ export async function getAllSessions() {
     request.onerror = () => reject(request.error);
   });
 }
-export async function getAllMessages() {
+
+/**
+ * Searches through all stored messages for a specific query string.
+ * Decrypts messages on-the-fly for matching.
+ */
+export async function searchMessages(query, masterKey, filterChatId = null, isGroup = false) {
   const db = await initRatchetDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_MESSAGES, 'readonly');
     const store = transaction.objectStore(STORE_MESSAGES);
     const request = store.getAll();
-    request.onsuccess = () => resolve(request.result);
+    
+    request.onsuccess = async () => {
+      const all = request.result;
+      const results = [];
+      const lowerQuery = query.toLowerCase();
+      
+      for (const msg of all) {
+        // filter by chat ID if provided
+        if (filterChatId) {
+          if (isGroup) {
+            if (msg.groupId !== filterChatId) continue;
+          } else {
+            // For 1-1, check if this message involves the partner
+            if (msg.senderId !== filterChatId && msg.recipientId !== filterChatId) continue;
+            if (msg.groupId) continue; // Skip group messages when searching 1-1
+          }
+        }
+
+        let content = msg.content;
+        if (msg.encrypted && masterKey) {
+          try {
+            content = await decryptData(msg.encrypted.ciphertextB64, msg.encrypted.ivB64, masterKey);
+          } catch (e) { continue; }
+        }
+        
+        if (content && content.toLowerCase().includes(lowerQuery)) {
+          results.push({ ...msg, content });
+        }
+      }
+      resolve(results.sort((a, b) => b.timestamp - a.timestamp));
+    };
     request.onerror = () => reject(request.error);
   });
 }

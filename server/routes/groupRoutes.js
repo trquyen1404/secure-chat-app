@@ -11,6 +11,9 @@ router.use(auth);
 // Create a new group (no membership check — creator is being added)
 router.post('/', validate(createGroupSchema), groupController.createGroup);
 
+// Join a group via code
+router.post('/join', groupController.joinByCode);
+
 // Get all groups the current user belongs to
 router.get('/', groupController.getUserGroups);
 
@@ -40,5 +43,13 @@ router.patch('/:groupId/settings', requireGroupMembership, groupController.updat
 
 // Update member settings
 router.patch('/:groupId/members/:memberId/settings', requireGroupMembership, groupController.updateMemberSettings);
+
+// Mute group
+router.post('/:groupId/mute', requireGroupMembership, groupController.toggleMute);
+
+// Pin a message
+router.get('/:groupId/pinned', requireGroupMembership, groupController.getPinnedGroupMessages);
+router.post('/:groupId/messages/:messageId/pin', requireGroupMembership, groupController.togglePinGroupMessage);
+router.get('/:groupId/read-status', requireGroupMembership, groupController.getReadStatus);
 
 module.exports = router;

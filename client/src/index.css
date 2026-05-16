@@ -1,74 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* UTT Brand Colors */
+    --utt-blue: #0054a6;
+    --utt-orange: #f47920;
+    --utt-blue-deep: #003d7a;
+    --utt-blue-light: #3a8cdb;
+
+    /* Light Mode */
+    --bg-primary: #f5f7fb;
+    --bg-secondary: #ffffff;
+    --bg-accent: #edf2f7;
+    --text-primary: #1a202c;
+    --text-secondary: #718096;
+    --border: rgba(0, 0, 0, 0.08);
+    --hover: rgba(0, 0, 0, 0.04);
+    --input-bg: #f7fafc;
+    --primary: var(--utt-blue);
+    --primary-light: var(--utt-blue-light);
+    --primary-dark: var(--utt-blue-deep);
+    --accent: var(--utt-orange);
+    --bubble-me: var(--utt-blue);
+    --bubble-them: #ffffff;
+    --text-on-me: #ffffff;
+    --text-on-them: #2d3748;
+    --glass: rgba(255, 255, 255, 0.75);
+    --glass-border: rgba(255, 255, 255, 0.6);
+    --status-online: #10b981;
+  }
+
+  .dark {
+    /* Dark Mode - UTT Dark Theme */
+    --bg-primary: #0a0f1d;
+    --bg-secondary: #12192c;
+    --bg-accent: #1e293b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --border: rgba(255, 255, 255, 0.08);
+    --hover: rgba(255, 255, 255, 0.06);
+    --input-bg: #1e293b;
+    --primary: #2563eb; /* Slightly lighter blue for dark mode visibility */
+    --primary-light: #60a5fa;
+    --primary-dark: #1d4ed8;
+    --accent: #fb923c;
+    --bubble-me: #2563eb;
+    --bubble-them: #1e293b;
+    --text-on-me: #ffffff;
+    --text-on-them: #f1f5f9;
+    --glass: rgba(18, 25, 44, 0.85);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --status-online: #34d399;
+  }
+
   body {
-    @apply bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans antialiased transition-colors duration-300;
+    @apply bg-[var(--bg-primary)] text-[var(--text-primary)] antialiased transition-colors duration-500 overflow-hidden;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  /* Animated Mesh Background */
+  .mesh-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background-color: var(--bg-primary);
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(210, 100%, 50%, 0.1) 0, transparent 50%), 
+      radial-gradient(at 50% 0%, hsla(230, 100%, 50%, 0.1) 0, transparent 50%), 
+      radial-gradient(at 100% 0%, hsla(250, 100%, 50%, 0.1) 0, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(210, 100%, 50%, 0.1) 0, transparent 50%),
+      radial-gradient(at 50% 100%, hsla(230, 100%, 50%, 0.1) 0, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(250, 100%, 50%, 0.1) 0, transparent 50%);
+    filter: blur(80px);
+    opacity: 0.6;
+    animation: meshMove 20s ease infinite alternate;
+  }
+
+  @keyframes meshMove {
+    0% { transform: scale(1) translate(0, 0); }
+    100% { transform: scale(1.1) translate(2%, 2%); }
   }
 }
 
-:root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f0f2f5;
-  --text-primary: #050505;
-  --text-secondary: #65676b;
-  --border: rgba(0, 0, 0, 0.1);
-  --hover: rgba(0, 0, 0, 0.05);
-  --input-bg: #f0f2f5;
-  --messenger-blue: #0084ff;
-  --bubble-me: #0084ff;
-  --bubble-them: #e4e6eb;
-  --text-on-them: #050505;
-}
-
-.dark {
-  --bg-primary: #000000;
-  --bg-secondary: #18191a;
-  --text-primary: #e4e6eb;
-  --text-secondary: #b0b3b8;
-  --border: rgba(255, 255, 255, 0.1);
-  --hover: rgba(255, 255, 255, 0.1);
-  --input-bg: #3a3b3c;
-  --bubble-them: #3a3b3c;
-  --text-on-them: #ffffff;
-}
-
 @layer utilities {
-  .messenger-gradient {
-    background: linear-gradient(135deg, #0084ff 0%, #00d2ff 100%);
+  .glass {
+    @apply backdrop-blur-[20px] border transition-all duration-300;
+    background: var(--glass);
+    border-color: var(--glass-border);
+  }
+
+  .glass-card {
+    @apply glass rounded-[32px] premium-shadow border-white/20 dark:border-white/5;
+  }
+  
+  .premium-shadow {
+    box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.2);
+  }
+
+  .premium-gradient {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-orange-500;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-600 rounded;
+  background: var(--border);
+  border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-500;
+  background: var(--text-secondary);
 }
 
-@keyframes slideInRight {
-  from { transform: translateX(20px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes slideInLeft {
-  from { transform: translateX(-20px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
-@keyframes fadeInUp {
-  from { transform: translateY(10px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+@keyframes slideUp {
+  from { transform: translateY(100%) translateX(-50%); opacity: 0; }
+  to { transform: translateY(0) translateX(-50%); opacity: 1; }
 }
 
-.animate-slide-in-right { animation: slideInRight 0.3s ease-out forwards; }
-.animate-slide-in-left { animation: slideInLeft 0.3s ease-out forwards; }
-.animate-fade-in-up { animation: fadeInUp 0.3s ease-out forwards; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-shake {
+  animation: shake 0.4s cubic-bezier(0.16, 1, 0.3, 1) ease-in-out;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+/* Message Bubble Special styling */
+.bubble-shadow {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}

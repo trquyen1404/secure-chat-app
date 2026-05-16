@@ -33,7 +33,7 @@ exports.getMessages = async (req, res) => {
     }
     const messages = await Message.findAll({
       where: whereClause,
-      attributes: ['id', 'senderId', 'recipientId', 'encryptedContent', 'ratchetKey', 'n', 'pn', 'iv', 'senderEk', 'usedOpk', 'type', 'localId', 'createdAt'],
+      attributes: ['id', 'senderId', 'recipientId', 'encryptedContent', 'ratchetKey', 'n', 'pn', 'iv', 'senderEk', 'usedOpk', 'type', 'localId', 'isPinned', 'expiresAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit
     });
@@ -83,5 +83,44 @@ exports.acknowledgeMessages = async (req, res) => {
   } catch (error) {
     console.error('[messageController] acknowledgeMessages error:', error);
     res.status(500).json({ error: 'Failed to acknowledge messages' });
+  }
+};
+
+exports.togglePinMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const currentUserId = req.userId;
+    const message = await Message.findByPk(messageId);
+    
+    if (!message) return res.status(404).json({ error: 'Message not found' });
+    
+    if (message.senderId !== currentUserId && message.recipientId !== currentUserId) {
+      return res.status(403).json({ error: 'Not allowed' });
+    }
+    
+    await message.update({ isPinned: !message.isPinned });
+    res.json({ id: message.id, isPinned: message.isPinned });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to pin message' });
+  }
+};
+
+exports.getPinnedMessages = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.userId;
+    const messages = await Message.findAll({
+      where: {
+        isPinned: true,
+        [Op.or]: [
+          { senderId: currentUserId, recipientId: userId },
+          { senderId: userId, recipientId: currentUserId }
+        ]
+      },
+      order: [['createdAt', 'DESC']]
+    });
+    res.json(messages);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch pinned messages' });
   }
 };
