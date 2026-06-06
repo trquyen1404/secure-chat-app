@@ -4,6 +4,7 @@ import {
   saveDecryptedMessage,
   getDecryptedMessage
 } from './ratchetStore';
+import api from './axiosConfig';
 import { loadTheirSenderKey, saveTheirSenderKey } from './senderKeyStore'; // Corrected import
 import { decryptGroupMessage } from './senderKeyLogic';
 import { getKey } from './keyStore';
@@ -33,10 +34,10 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
   return await navigator.locks.request(lockName, async () => {
     try {
       // 0. Idempotency Check: Don't re-process if already decrypted
-      console.log(`[E2EE-Logic] Processing message for ${senderId}. Index n: ${msg.n}`);
+      if (import.meta.env.DEV) console.log(`[E2EE-Logic] Processing message for ${senderId}. Index n: ${msg.n}`);
       const cachedContent = await getDecryptedMessage(msg.id, masterKey);
       if (cachedContent && !cachedContent.startsWith('[Chờ chìa khóa') && !cachedContent.startsWith('[Lỗi giải mã')) {
-        console.log(`[E2EE-Logic] Found cached plaintext for ${msg.id}. Skipping ratchet.`);
+        if (import.meta.env.DEV) console.log(`[E2EE-Logic] Found cached plaintext for ${msg.id}. Skipping ratchet.`);
         return { content: cachedContent, success: true };
       }
 
@@ -67,13 +68,8 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
         // [Safety Check] If we already have a session in ESTABLISHED state, we don't adopt unless it's a newer ratchet 
         // (handled by rotation logic below). This avoids "Missing Peer IK" when background sync aligns sessions.
         if (session && session.status === 'ESTABLISHED') {
-          console.log('[E2EE-Logic] Session already ESTABLISHED. Skipping redundant adoption.');
+          if (import.meta.env.DEV) console.log('[E2EE-Logic] Session already ESTABLISHED. Skipping redundant adoption.');
         } else {
-          if (!peerInfo) {
-            console.warn(`[E2EE-Handshake] Deferred: Peer info required for adoption from ${senderId}.`);
-            return { content: '[Handshake Pending Bundle]', success: false };
-          }
-
           const bobSPK_priv = await getKey(`spk_priv_${localId}`, masterKey);
           const bobIKdh_priv = await getKey(`ik_dh_priv_${localId}`, masterKey);
           const bobOPK_priv = msg.usedOpk ? await getKey(`opk_priv_${localId}_${msg.usedOpk}`, masterKey) : null;
@@ -84,16 +80,31 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
 
           // Defensive key extraction with multiple fallbacks & validation
           let aliceIKdh_pub = null;
-          if (peerInfo.dhPublicKey) {
-            aliceIKdh_pub = (typeof peerInfo.dhPublicKey === 'object') ? (peerInfo.dhPublicKey.dh || peerInfo.dhPublicKey.publicKey) : peerInfo.dhPublicKey;
-          } else if (peerInfo.identityKey) {
-            aliceIKdh_pub = (typeof peerInfo.identityKey === 'object') ? (peerInfo.identityKey.dh || peerInfo.identityKey.publicKey) : peerInfo.identityKey;
-          } else {
-            aliceIKdh_pub = peerInfo.publicKey;
+          if (peerInfo) {
+            if (peerInfo.dhPublicKey) {
+              aliceIKdh_pub = (typeof peerInfo.dhPublicKey === 'object') ? (peerInfo.dhPublicKey.dh || peerInfo.dhPublicKey.publicKey) : peerInfo.dhPublicKey;
+            } else if (peerInfo.identityKey) {
+              aliceIKdh_pub = (typeof peerInfo.identityKey === 'object') ? (peerInfo.identityKey.dh || peerInfo.identityKey.publicKey) : peerInfo.identityKey;
+            } else {
+              aliceIKdh_pub = peerInfo.publicKey;
+            }
           }
 
           if (!aliceIKdh_pub || (typeof aliceIKdh_pub === 'string' && aliceIKdh_pub.length < 32)) {
-            console.warn(`[E2EE-Handshake] Deferred: Remote Identity Key missing or invalid for ${senderId}.`, peerInfo);
+            if (import.meta.env.DEV) console.log(`[E2EE-Handshake] Remote Identity Key missing or invalid for ${senderId}. Fetching prekey-bundle...`);
+            try {
+              const res = await api.get(`/api/users/${senderId}/prekey-bundle`);
+              const bundle = res.data;
+              if (bundle && bundle.identityKey && bundle.identityKey.dh) {
+                aliceIKdh_pub = bundle.identityKey.dh;
+              }
+            } catch (err) {
+              console.error(`[E2EE-Handshake] Failed to fetch prekey bundle for ${senderId}:`, err.message);
+            }
+          }
+
+          if (!aliceIKdh_pub || (typeof aliceIKdh_pub === 'string' && aliceIKdh_pub.length < 32)) {
+            console.warn(`[E2EE-Handshake] Deferred: Remote Identity Key missing or invalid for ${senderId}.`);
             return { content: '[Handshake Error: Missing Peer IK]', success: false };
           }
 
@@ -111,7 +122,7 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
           };
 
           await saveSession(senderId, session, masterKey);
-          console.log('[E2EE-Logic] Handshake Adopted.');
+          if (import.meta.env.DEV) console.log('[E2EE-Logic] Handshake Adopted.');
           window.dispatchEvent(new CustomEvent('session_updated', { detail: { userId: senderId } }));
         }
       } else if ((msg.senderEk || msg.type === 'handshake_ack') && session && (session.status === 'INITIALIZING' || session.status === 'ESTABLISHED')) {
@@ -122,7 +133,7 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
            if ((session.nextRecvIndex || 0) === 0) session.nextRecvIndex = 0;
            if ((session.nextSendIndex || 0) === 0) session.nextSendIndex = 0;
            await saveSession(senderId, session, masterKey);
-           console.log('[E2EE-Logic] Initiator Session ALIGNED to ESTABLISHED.');
+           if (import.meta.env.DEV) console.log('[E2EE-Logic] Initiator Session ALIGNED to ESTABLISHED.');
            window.dispatchEvent(new CustomEvent('session_updated', { detail: { userId: senderId } }));
         }
       }
@@ -149,7 +160,7 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
       const targetIndex = msg.n || 0;
       
       // [Traceability] Restore critical pipeline logging
-      console.log(`[E2EE-Ratchet] Processing Pipeline: Target Index (n): ${targetIndex}, Current Recv Counter: ${tempSession.nextRecvIndex || 0}`);
+      if (import.meta.env.DEV) console.log(`[E2EE-Ratchet] Processing Pipeline: Target Index (n): ${targetIndex}, Current Recv Counter: ${tempSession.nextRecvIndex || 0}`);
       
       let safetyCount = 0;
       
@@ -163,13 +174,13 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
       
       if (tempSession.recvChainKey && !(tempSession.recvChainKey instanceof CryptoKey)) {
         if (tempSession.recvChainKey._isJWK) {
-          console.log(`[E2EE-Healing] Re-importing recvChainKey for ${senderId}...`);
+          if (import.meta.env.DEV) console.log(`[E2EE-Healing] Re-importing recvChainKey for ${senderId}...`);
           tempSession.recvChainKey = await importKeyFromJWK(tempSession.recvChainKey.jwk, aesAlg, aesUsages);
         }
       }
       if (tempSession.sendChainKey && !(tempSession.sendChainKey instanceof CryptoKey)) {
         if (tempSession.sendChainKey._isJWK) {
-          console.log(`[E2EE-Healing] Re-importing sendChainKey for ${senderId}...`);
+          if (import.meta.env.DEV) console.log(`[E2EE-Healing] Re-importing sendChainKey for ${senderId}...`);
           tempSession.sendChainKey = await importKeyFromJWK(tempSession.sendChainKey.jwk, aesAlg, aesUsages);
         }
       }
@@ -178,9 +189,11 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
         const { nextChainKey, messageKey: derivedKey } = await ratchetChain(tempSession.recvChainKey);
         
         // [CRYPTO-Audit] Trace chain advancement
-        const ckFingerprint = await window.crypto.subtle.exportKey('raw', tempSession.recvChainKey).then(k => getFingerprint(k));
-        const mkFingerprint = await window.crypto.subtle.exportKey('raw', derivedKey).then(k => getFingerprint(k));
-        console.log(`[CRYPTO-Audit] Ratchet Step ${tempSession.nextRecvIndex}: CK_FP=${ckFingerprint}, MK_FP=${mkFingerprint}`);
+        if (import.meta.env.DEV) {
+          const ckFingerprint = await window.crypto.subtle.exportKey('raw', tempSession.recvChainKey).then(k => getFingerprint(k));
+          const mkFingerprint = await window.crypto.subtle.exportKey('raw', derivedKey).then(k => getFingerprint(k));
+          console.log(`[CRYPTO-Audit] Ratchet Step ${tempSession.nextRecvIndex}: CK_FP=${ckFingerprint}, MK_FP=${mkFingerprint}`);
+        }
 
         tempSession.recvChainKey = nextChainKey; 
         messageKey = derivedKey;
@@ -215,8 +228,10 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
       }
 
       try {
-        const mkFingerprint = await window.crypto.subtle.exportKey('raw', messageKey).then(k => getFingerprint(k));
-        console.log(`[CRYPTO-Audit] Decrypting (n=${targetIndex}) with MK_FP: ${mkFingerprint}, AD: "${sessionAD}"`);
+        if (import.meta.env.DEV) {
+          const mkFingerprint = await window.crypto.subtle.exportKey('raw', messageKey).then(k => getFingerprint(k));
+          console.log(`[CRYPTO-Audit] Decrypting (n=${targetIndex}) with MK_FP: ${mkFingerprint}, AD: "${sessionAD}"`);
+        }
         
         const decrypted = await decryptMessageGCM(msg.encryptedContent, msg.iv, messageKey, sessionAD);
         await saveSession(senderId, tempSession, masterKey);
@@ -230,9 +245,26 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
           timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()
         }, masterKey);
 
+        if (msg.type === 'SENDER_KEY_DISTRIBUTION') {
+          try {
+            const dist = JSON.parse(decrypted);
+            await saveTheirSenderKey(dist.groupId, msg.senderId, {
+              chainKeyB64: dist.chainKeyB64,
+              signaturePublicKeyB64: dist.signaturePublicKeyB64,
+              index: 0
+            }, masterKey);
+            if (import.meta.env.DEV) console.log(`[E2EE-Logic] ✅ Saved Sender Key from ${msg.senderId} for group ${dist.groupId}.`);
+            window.dispatchEvent(new CustomEvent('senderkey_received', {
+              detail: { groupId: dist.groupId, senderId: msg.senderId }
+            }));
+          } catch (e) {
+            console.error('[E2EE-Logic] Malformed SENDER_KEY_DISTRIBUTION content', e);
+          }
+        }
+
         // PHÁT TÍN HIỆU TOÀN CẦU CHO REACT
         window.dispatchEvent(new CustomEvent('e2ee_message_synced', { 
-            detail: { ...msg, decryptedContent: decrypted } 
+            detail: { ...msg, decryptedContent: decrypted, burnOnRead: msg.type === 'burn' } 
         }));
 
         return { content: decrypted, success: true };
@@ -245,7 +277,7 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
         
         // [E2EE-Logic] Standard decryption failed, trying Late Adoption...
         if (msg.senderEk || msg.type === 'SENDER_KEY_DISTRIBUTION' || msg.n === 0) {
-          console.log('[E2EE-Logic] Standard decryption failed, trying Late Adoption/Correction...');
+          if (import.meta.env.DEV) console.log('[E2EE-Logic] Standard decryption failed, trying Late Adoption/Correction...');
         } else {
           // [Fix] Signal desync if we have no technical recovery path
           console.warn(`[E2EE-Desync] OperationError for ${senderId} at index ${targetIndex}. Signaling for reset.`);
@@ -284,6 +316,10 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
             
             let catchupKey = null;
             let catchupChain = recvChainKey;
+            const MAX_CATCHUP = 100;
+            if ((msg.n || 0) > MAX_CATCHUP) {
+              throw new Error(`Exceeded max late-adoption catchup loop limit (${MAX_CATCHUP})`);
+            }
             for (let i = 0; i <= (msg.n || 0); i++) {
               const { nextChainKey, messageKey: mk } = await ratchetChain(catchupChain);
               catchupChain = nextChainKey;
@@ -317,7 +353,7 @@ export async function processIncomingMessage(msg, masterKey, currentUser, peerIn
         return { content: "[Phiên bản khóa cũ]", success: false };
       }
     } catch (err) {
-      console.error('[ratchetLogic] Final fallback:', err);
+      console.error('[ratchetLogic] Final fallback:', err.stack || err);
       return { content: '[Error]', success: false };
     }
   });
@@ -335,9 +371,9 @@ export async function processGroupMessage(msg, masterKey, currentUser, activeGro
   }
 
   const lockName = `group_ratchet_${activeGroupId}_${msg.senderId}`;
-  console.log(`[Group-Lock] WAITING FOR: ${lockName} (msg=${msg.id || msg.localId})`);
+  if (import.meta.env.DEV) console.log(`[Group-Lock] WAITING FOR: ${lockName} (msg=${msg.id || msg.localId})`);
   return await navigator.locks.request(lockName, async () => {
-    console.log(`[Group-Lock] ACQUIRED: ${lockName} (msg=${msg.id || msg.localId})`);
+    if (import.meta.env.DEV) console.log(`[Group-Lock] ACQUIRED: ${lockName} (msg=${msg.id || msg.localId})`);
     try {
       // 1. Idempotency check (Check central plaintext cache)
       const cached = await getDecryptedMessage(msg.id, masterKey) || (msg.localId ? await getDecryptedMessage(msg.localId, masterKey) : null);
@@ -350,7 +386,7 @@ export async function processGroupMessage(msg, masterKey, currentUser, activeGro
       const targetGroupId = activeGroupId || msg.groupId;
       const senderKey = await loadTheirSenderKey(targetGroupId, msg.senderId, masterKey);
       
-      console.log(`[Group-Trace] Processing msg=${msg.id || msg.localId} index=${msg.n ?? msg.index} from=${msg.senderId}. Current SenderKey index=${senderKey?.index ?? 'NULL'}`);
+      if (import.meta.env.DEV) console.log(`[Group-Trace] Processing msg=${msg.id || msg.localId} index=${msg.n ?? msg.index} from=${msg.senderId}. Current SenderKey index=${senderKey?.index ?? 'NULL'}`);
 
       if (!senderKey) {
         console.warn(`[Group-Logic] Missing SenderKey for user ${msg.senderId} in group ${targetGroupId}`);
@@ -384,7 +420,7 @@ export async function processGroupMessage(msg, masterKey, currentUser, activeGro
       console.error(`[Group-Logic] Decryption failed (n=${msg.n || msg.index}) for msg=${msg.id || msg.localId}:`, err.message);
       return { content: `[Lỗi giải mã nhóm: ${err.message}]`, success: false };
     } finally {
-      console.log(`[Group-Lock] RELEASED: ${lockName} (msg=${msg.id || msg.localId})`);
+      if (import.meta.env.DEV) console.log(`[Group-Lock] RELEASED: ${lockName} (msg=${msg.id || msg.localId})`);
     }
   });
 }

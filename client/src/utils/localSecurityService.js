@@ -1,17 +1,44 @@
-const DB_NAME = 'SecureChatLocalSecurity';
 const DB_VERSION = 1;
 const STORE_NAME = 'device_security';
 
+let dbHandle = null;
+
+function getDBName() {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      if (user && user.id) {
+        return `SecureChatLocalSecurity-${user.id}`;
+      }
+    }
+  } catch (e) {}
+  return 'SecureChatLocalSecurity';
+}
+
 function openDB() {
+  const currentDbName = getDBName();
+  if (dbHandle && dbHandle.name === currentDbName) return Promise.resolve(dbHandle);
+  if (dbHandle) {
+    dbHandle.close();
+    dbHandle = null;
+  }
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(currentDbName, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
       }
     };
-    req.onsuccess = (e) => resolve(e.target.result);
+    req.onsuccess = (e) => {
+      dbHandle = e.target.result;
+      dbHandle.onversionchange = () => {
+        dbHandle.close();
+        dbHandle = null;
+      };
+      resolve(dbHandle);
+    };
     req.onerror = (e) => reject(e.target.error);
   });
 }
@@ -98,8 +125,9 @@ export async function loadLocalVaultVersion() {
  * Wipes the entire Local Security database.
  */
 export async function wipeLocalSecurity() {
+  const currentDbName = getDBName();
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(DB_NAME);
+    const req = indexedDB.deleteDatabase(currentDbName);
     req.onsuccess = () => resolve();
     req.onerror = (e) => reject(e.target.error);
     req.onblocked = () => resolve();

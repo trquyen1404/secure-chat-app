@@ -1,4 +1,4 @@
-const { Resource, User } = require('../models');
+const { Resource, User, GroupMember } = require('../models');
 
 exports.addResource = async (req, res) => {
   try {
@@ -45,9 +45,14 @@ exports.deleteResource = async (req, res) => {
     const resource = await Resource.findByPk(id);
     if (!resource) return res.status(404).json({ message: 'Resource not found' });
     
-    // Only uploader or admin/teacher (logic simplified) can delete
-    if (resource.userId !== userId) {
-      return res.status(403).json({ message: 'No permission' });
+    // Allow uploader, group admin or teacher to delete
+    const member = await GroupMember.findOne({ where: { groupId: resource.groupId, userId } });
+    const isUploader = resource.userId === userId;
+    const isAdmin = member && member.role === 'admin';
+    const isTeacher = req.user && req.user.role === 'teacher';
+
+    if (!isUploader && !isAdmin && !isTeacher) {
+      return res.status(403).json({ error: 'Bạn không có quyền xóa tài liệu này.' });
     }
 
     await resource.destroy();
@@ -61,8 +66,23 @@ exports.deleteResource = async (req, res) => {
 exports.togglePin = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.userId;
     const resource = await Resource.findByPk(id);
     if (!resource) return res.status(404).json({ message: 'Resource not found' });
+
+    // Verify membership & permissions: uploader, group admin or teacher can pin
+    const member = await GroupMember.findOne({ where: { groupId: resource.groupId, userId } });
+    if (!member) {
+      return res.status(403).json({ error: 'Truy cập bị từ chối: Bạn không phải thành viên của nhóm học tập này.' });
+    }
+
+    const isUploader = resource.userId === userId;
+    const isAdmin = member.role === 'admin';
+    const isTeacher = req.user && req.user.role === 'teacher';
+
+    if (!isUploader && !isAdmin && !isTeacher) {
+      return res.status(403).json({ error: 'Chỉ người tải lên, giảng viên hoặc quản trị viên nhóm mới có quyền ghim tài liệu.' });
+    }
 
     resource.isPinned = !resource.isPinned;
     await resource.save();

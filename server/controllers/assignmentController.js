@@ -1,4 +1,4 @@
-const { Assignment, Submission, User, Group } = require('../models');
+const { Assignment, Submission, User, Group, GroupMember } = require('../models');
 const notificationService = require('../services/notificationService');
 
 exports.createAssignment = async (req, res) => {
@@ -6,7 +6,11 @@ exports.createAssignment = async (req, res) => {
     const { groupId, title, description, deadline, fileUrl, points } = req.body;
     const teacherId = req.userId;
 
-    // Optional: Check if user is teacher in this group
+    // Check permissions: creator must be a teacher OR group admin
+    const member = await GroupMember.findOne({ where: { groupId, userId: teacherId } });
+    if (!member || (member.role !== 'admin' && req.user.role !== 'teacher')) {
+      return res.status(403).json({ error: 'Chỉ giảng viên hoặc quản trị viên nhóm mới có quyền thực hiện hành động này.' });
+    }
     const assignment = await Assignment.create({
       groupId,
       teacherId,
@@ -61,6 +65,12 @@ exports.submitAssignment = async (req, res) => {
 
     const assignment = await Assignment.findByPk(assignmentId);
     if (!assignment) return res.status(404).json({ message: 'Assignment not found' });
+
+    // Verify membership: student must be in the group of this assignment
+    const isMember = await GroupMember.findOne({ where: { groupId: assignment.groupId, userId: studentId } });
+    if (!isMember) {
+      return res.status(403).json({ error: 'Truy cập bị từ chối: Bạn không phải thành viên của nhóm học tập này.' });
+    }
 
     if (new Date() > new Date(assignment.deadline)) {
       return res.status(400).json({ message: 'Quá hạn nộp bài' });

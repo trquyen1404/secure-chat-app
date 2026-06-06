@@ -22,14 +22,8 @@ export const AuthProvider = ({ children }) => {
     if (isLoggingOut) return;
     setIsLoggingOut(true);
     
-    // [Immediate Feedback] Clear UI state and tokens first so the user sees progress
-    setToken(null);
-    setUser(null);
-    setIdentityKeys(null);
-    setMasterKey(null);
+    setIsLoggingOut(true);
     setNeedsPassphraseRestore(false);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
 
     let shouldWipe = false;
 
@@ -44,18 +38,24 @@ export const AuthProvider = ({ children }) => {
         shouldWipe = true;
       } catch (err) {
         console.warn('[AUTH] Pre-logout sync failed or timed out:', err.message);
-        if (window.confirm("⚠️ Không thể sao lưu Két sắt. Nếu đăng xuất, dữ liệu cục bộ sẽ bị XÓA. Tiếp tục?")) {
+        if (window.confirm("⚠️ Không thể sao lưu Két sắt. Dữ liệu cục bộ sẽ bị xóa. Tiếp tục?")) {
           shouldWipe = true;
         } else {
-          // Rollback logout if user cancels (but token is already cleared, so they'll likely need to log in again regardless)
           setIsLoggingOut(false);
-          window.location.reload(); 
+          window.location.reload();
           return;
         }
       }
     } else {
       shouldWipe = true;
     }
+
+    setToken(null);
+    setUser(null);
+    setIdentityKeys(null);
+    setMasterKey(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
 
     if (shouldWipe) {
       try {
@@ -118,6 +118,13 @@ export const AuthProvider = ({ children }) => {
                 setMasterKey(restoredMKey);
                 setNeedsPassphraseRestore(false);
                 console.log('[AUTH-INIT] Session auto-restored via unwrap! No passphrase needed.');
+
+                // Trigger offline message sync
+                import('../utils/offlineSyncService').then(({ syncOfflineMessages }) => {
+                  syncOfflineMessages(restoredMKey, profile);
+                }).catch(err => {
+                  console.error('[AUTH-INIT] Failed to start offline sync:', err);
+                });
               } else {
                 console.warn('[AUTH-INIT] Keys missing in KeyStore. Manual restore required.');
                 setNeedsPassphraseRestore(true);
@@ -148,7 +155,6 @@ export const AuthProvider = ({ children }) => {
     setUser(data.user);
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data.user));
-    setNeedsPassphraseRestore(true);
   };
 
   const updateUser = (userData) => {

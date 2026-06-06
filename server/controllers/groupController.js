@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Group, GroupMember, GroupMessage, User, sequelize } = require('../models');
+const { Group, GroupMember, GroupMessage, User, sequelize, Poll, PollOption, PollVote, Assignment, Submission, Exam, Question, FlashcardSet, Flashcard, AttendanceSession, AttendanceRecord, Note, Resource, Announcement, Grade, Confession, SecretSantaSession } = require('../models');
 
 /**
  * Create a new group.
@@ -12,8 +12,13 @@ exports.createGroup = async (req, res) => {
     const creatorId = req.userId;
     if (!name) return res.status(400).json({ error: 'Group name required' });
 
-    // Generate random 6-character code
-    const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    if (memberIds && Array.isArray(memberIds) && memberIds.length > 400) {
+      return res.status(400).json({ error: 'Nhóm tối đa 400 thành viên' });
+    }
+
+    // Generate random 6-character code cryptographically securely
+    const crypto = require('crypto');
+    const inviteCode = crypto.randomBytes(3).toString('hex').toUpperCase();
 
     const group = await Group.create({ 
       name, 
@@ -170,28 +175,38 @@ exports.getUserGroups = async (req, res) => {
       }]
     });
     
-    // Map memberships to include both Group data and membership metadata (lastReadMessageId)
-    const groups = await Promise.all(groupMemberships.map(async (m) => {
-      if (!m.Group) return null;
-      
-      // Fetch latest message for this group (excluding technical distribution messages)
-      const latestMessage = await GroupMessage.findOne({
-        where: { 
-          groupId: m.Group.id,
-          type: { [Op.notIn]: ['handshake_ack', 'SENDER_KEY_DISTRIBUTION', 'SESSION_DESYNC_ERROR'] }
-        },
-        order: [['createdAt', 'DESC']],
-        attributes: ['id', 'senderId', 'encryptedContent', 'createdAt', 'type']
-      });
+    const groupIds = groupMemberships.map(m => m.Group?.id).filter(Boolean);
+    if (groupIds.length === 0) {
+      return res.json([]);
+    }
 
-      return {
+    // Fetch latest message for all groups in a single query safely without SQL Injection
+    const latestMessages = await sequelize.query(
+      `SELECT DISTINCT ON ("groupId") id, "groupId", "senderId", "encryptedContent", "createdAt", "type"
+       FROM "GroupMessages"
+       WHERE "groupId" IN (:groupIds)
+         AND "type" NOT IN ('handshake_ack', 'SENDER_KEY_DISTRIBUTION', 'SESSION_DESYNC_ERROR')
+       ORDER BY "groupId", "createdAt" DESC`,
+      {
+        replacements: { groupIds },
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const latestMap = {};
+    latestMessages.forEach(m => {
+      latestMap[m.groupId] = m;
+    });
+
+    const groups = groupMemberships
+      .filter(m => m.Group)
+      .map(m => ({
         ...m.Group.get({ plain: true }),
         lastReadMessageId: m.lastReadMessageId,
-        latestMessage: latestMessage || null
-      };
-    }));
+        latestMessage: latestMap[m.Group.id] || null
+      }));
 
-    res.json(groups.filter(g => g !== null));
+    res.json(groups);
   } catch (err) {
     console.error('[getUserGroups]', err);
     res.status(500).json({ error: 'Failed to fetch user groups' });
@@ -215,6 +230,15 @@ exports.joinByCode = async (req, res) => {
       userId: req.userId,
       role: 'member',
     });
+
+    try {
+      const socketService = require('../services/socketService');
+      if (socketService && typeof socketService.invalidateMembershipCache === 'function') {
+        socketService.invalidateMembershipCache(group.id);
+      }
+    } catch (e) {
+      console.error('[groupController] failed to invalidate cache:', e);
+    }
 
     res.json({ message: 'Tham gia nhóm thành công', group });
   } catch (err) {
@@ -325,10 +349,85 @@ exports.deleteGroup = async (req, res) => {
       return res.status(403).json({ error: 'Only group admins can delete the group' });
     }
 
-    // [Cleanup] Messages and members will be handled by DB cascades or manual cleanup if needed
-    // Assuming Sequelize associations handle onDelete: CASCADE
-    await group.destroy();
+    // [Cleanup] Cascade delete all satellite data using a transaction to avoid foreign key constraints
+    const t = await sequelize.transaction();
+    try {
+      // Find all IDs to delete dependent sub-records
+      const polls = await Poll.findAll({ where: { groupId }, transaction: t });
+      const pollIds = polls.map(p => p.id);
+
+      const assignments = await Assignment.findAll({ where: { groupId }, transaction: t });
+      const assignmentIds = assignments.map(a => a.id);
+
+      const exams = await Exam.findAll({ where: { groupId }, transaction: t });
+      const examIds = exams.map(e => e.id);
+
+      const flashcardSets = await FlashcardSet.findAll({ where: { groupId }, transaction: t });
+      const setIds = flashcardSets.map(f => f.id);
+
+      const sessions = await AttendanceSession.findAll({ where: { groupId }, transaction: t });
+      const sessionIds = sessions.map(s => s.id);
+
+      // 1. Delete deeply nested records (leaf nodes first)
+      if (pollIds.length > 0) {
+        await PollVote.destroy({ where: { pollId: { [Op.in]: pollIds } }, transaction: t });
+        await PollOption.destroy({ where: { pollId: { [Op.in]: pollIds } }, transaction: t });
+      }
+      await Poll.destroy({ where: { groupId }, transaction: t });
+
+      if (assignmentIds.length > 0) {
+        await Submission.destroy({ where: { assignmentId: { [Op.in]: assignmentIds } }, transaction: t });
+      }
+      await Assignment.destroy({ where: { groupId }, transaction: t });
+
+      if (examIds.length > 0) {
+        await Question.destroy({ where: { examId: { [Op.in]: examIds } }, transaction: t });
+      }
+      await Exam.destroy({ where: { groupId }, transaction: t });
+
+      if (setIds.length > 0) {
+        await Flashcard.destroy({ where: { setId: { [Op.in]: setIds } }, transaction: t });
+      }
+      await FlashcardSet.destroy({ where: { groupId }, transaction: t });
+
+      if (sessionIds.length > 0) {
+        await AttendanceRecord.destroy({ where: { sessionId: { [Op.in]: sessionIds } }, transaction: t });
+      }
+      await AttendanceSession.destroy({ where: { groupId }, transaction: t });
+
+      // 2. Delete direct satellite records
+      await Note.destroy({ where: { groupId }, transaction: t });
+      await Resource.destroy({ where: { groupId }, transaction: t });
+      await Announcement.destroy({ where: { groupId }, transaction: t });
+      await Grade.destroy({ where: { groupId }, transaction: t });
+      await Confession.destroy({ where: { groupId }, transaction: t });
+      
+      if (SecretSantaSession) {
+        await SecretSantaSession.destroy({ where: { groupId }, transaction: t });
+      }
+
+      // 3. Delete group members and group messages
+      await GroupMember.destroy({ where: { groupId }, transaction: t });
+      await GroupMessage.destroy({ where: { groupId }, transaction: t });
+
+      // 4. Finally destroy the group
+      await group.destroy({ transaction: t });
+
+      await t.commit();
+    } catch (txError) {
+      await t.rollback();
+      throw txError;
+    }
     
+    try {
+      const socketService = require('../services/socketService');
+      if (socketService && typeof socketService.invalidateMembershipCache === 'function') {
+        socketService.invalidateMembershipCache(groupId);
+      }
+    } catch (e) {
+      console.error('[groupController] failed to invalidate cache:', e);
+    }
+
     res.json({ message: 'Group deleted successfully', groupId });
   } catch (err) {
     console.error('[deleteGroup] Error:', err);
@@ -353,7 +452,14 @@ exports.updateGroupSettings = async (req, res) => {
 
     if (themeColor) group.themeColor = themeColor;
     if (quickEmoji) group.quickEmoji = quickEmoji;
-    if (selfDestructTimer !== undefined) group.selfDestructTimer = selfDestructTimer;
+    
+    // selfDestructTimer là setting nhạy cảm — chỉ admin được thay đổi
+    if (selfDestructTimer !== undefined) {
+      if (membership.role !== 'admin') {
+        return res.status(403).json({ error: 'Chỉ admin mới có thể thay đổi bộ hẹn giờ tự hủy' });
+      }
+      group.selfDestructTimer = selfDestructTimer;
+    }
     
     await group.save();
     res.json(group);
@@ -390,6 +496,53 @@ exports.updateMemberSettings = async (req, res) => {
     res.status(500).json({ error: 'Failed to update member settings' });
   }
 };
+
+/** Kick a member from the group (Admin only) */
+exports.kickMember = async (req, res) => {
+  try {
+    const { groupId, memberId } = req.params;
+    const requesterId = req.userId;
+
+    // 1. Check if the requester is an admin in this group
+    const requesterMembership = await GroupMember.findOne({ where: { groupId, userId: requesterId } });
+    if (!requesterMembership || requesterMembership.role !== 'admin') {
+      return res.status(403).json({ error: 'Chỉ quản trị viên mới được xóa thành viên khỏi nhóm' });
+    }
+
+    // 2. Find the membership of the member to kick
+    const memberMembership = await GroupMember.findOne({ where: { groupId, userId: memberId } });
+    if (!memberMembership) {
+      return res.status(404).json({ error: 'Thành viên không tồn tại trong nhóm' });
+    }
+
+    // Cannot kick oneself
+    if (String(memberId) === String(requesterId)) {
+      return res.status(400).json({ error: 'Bạn không thể tự xóa bản thân khỏi nhóm' });
+    }
+
+    // 3. Delete membership
+    await memberMembership.destroy();
+
+    // 4. Invalidate socket membership cache and boot user's socket room
+    try {
+      const socketService = require('../services/socketService');
+      if (socketService && typeof socketService.invalidateMembershipCache === 'function') {
+        socketService.invalidateMembershipCache(groupId);
+      }
+      if (socketService && typeof socketService.kickUserFromGroupRoom === 'function') {
+        socketService.kickUserFromGroupRoom(memberId, groupId);
+      }
+    } catch (e) {
+      console.error('[groupController] failed to invalidate cache or kick socket room:', e);
+    }
+
+    res.json({ message: 'Đã xóa thành viên khỏi nhóm thành công', memberId });
+  } catch (err) {
+    console.error('[kickMember] Error:', err);
+    res.status(500).json({ error: 'Lỗi khi xóa thành viên khỏi nhóm' });
+  }
+};
+
 /** Toggle pin status for a group message (Admin only) */
 exports.togglePinGroupMessage = async (req, res) => {
   try {

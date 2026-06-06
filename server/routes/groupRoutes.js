@@ -44,6 +44,9 @@ router.patch('/:groupId/settings', requireGroupMembership, groupController.updat
 // Update member settings
 router.patch('/:groupId/members/:memberId/settings', requireGroupMembership, groupController.updateMemberSettings);
 
+// Kick a member (admin only)
+router.post('/:groupId/members/:memberId/kick', requireGroupMembership, groupController.kickMember);
+
 // Mute group
 router.post('/:groupId/mute', requireGroupMembership, groupController.toggleMute);
 

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { User, Message, Block, GroupMessage, GroupMember } = require('../models');
+const { User, Message, Block, GroupMessage, GroupMember, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const notificationService = require('./notificationService');
 const uttBotService = require('./uttBotService');
@@ -7,6 +7,21 @@ const uttBotService = require('./uttBotService');
 const JWT_SECRET = process.env.JWT_SECRET;
 const userSockets = new Map();
 const membershipCache = new Map(); // groupId -> Set(userIds)
+const socketRateLimit = new Map(); // key = "userId:action" -> { count, resetAt }
+const heartbeats = new Map(); // userId -> lastActiveTimestamp
+
+function checkRateLimit(userId, action, maxPerMinute = 60) {
+  const now = Date.now();
+  const key = `${userId}:${action}`;
+  const entry = socketRateLimit.get(key) || { count: 0, resetAt: now + 60000 };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + 60000;
+  }
+  entry.count++;
+  socketRateLimit.set(key, entry);
+  return entry.count <= maxPerMinute;
+}
 
 async function getGroupMembers(groupId) {
   if (membershipCache.has(groupId)) return membershipCache.get(groupId);
@@ -17,17 +32,26 @@ async function getGroupMembers(groupId) {
 }
 
 async function getContactIds(userId) {
-  const rows = await Message.findAll({
-    where: { [Op.or]: [{ senderId: userId }, { recipientId: userId }] },
-    attributes: ['senderId', 'recipientId'],
-    raw: true,
-  });
-  const ids = new Set();
-  rows.forEach(r => {
-    if (r.senderId !== userId) ids.add(r.senderId);
-    if (r.recipientId !== userId) ids.add(r.recipientId);
-  });
-  return Array.from(ids);
+  try {
+    const rows = await sequelize.query(
+      `SELECT DISTINCT 
+         CASE 
+           WHEN "senderId" = :userId THEN "recipientId" 
+           ELSE "senderId" 
+         END AS "contactId"
+       FROM "Messages"
+       WHERE "senderId" = :userId OR "recipientId" = :userId
+       LIMIT 500`,
+      {
+        replacements: { userId },
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+    return rows.map(r => r.contactId).filter(Boolean);
+  } catch (err) {
+    console.error('[SOCKET] getContactIds error:', err);
+    return [];
+  }
 }
 
 /** Background task to delete expired messages */
@@ -35,20 +59,22 @@ async function cleanupExpiredMessages(io) {
   try {
     const now = new Date();
     
-    // Find expired group messages to notify clients before deletion
+    // Find expired group messages to notify clients before deletion (limited to 500 per batch)
     const expiredGroups = await GroupMessage.findAll({
       where: { expiresAt: { [Op.lte]: now } },
-      attributes: ['id', 'groupId']
+      attributes: ['id', 'groupId'],
+      limit: 500
     });
     
     for (const msg of expiredGroups) {
       io.to(`group:${msg.groupId}`).emit('messageDeleted', { messageId: msg.id, isDeleted: true, reason: 'expired' });
     }
     
-    // Find expired individual messages
+    // Find expired individual messages (limited to 500 per batch)
     const expiredPrivate = await Message.findAll({
       where: { expiresAt: { [Op.lte]: now } },
-      attributes: ['id', 'senderId', 'recipientId']
+      attributes: ['id', 'senderId', 'recipientId'],
+      limit: 500
     });
     
     for (const msg of expiredPrivate) {
@@ -59,21 +85,75 @@ async function cleanupExpiredMessages(io) {
       if (p2) io.to(p2).emit('messageDeleted', payload);
     }
 
-    await GroupMessage.destroy({ where: { expiresAt: { [Op.lte]: now } } });
-    await Message.destroy({ where: { expiresAt: { [Op.lte]: now } } });
+    // Delete only the fetched batches to prevent CPU/memory spikes and locking issues
+    const expiredGroupIds = expiredGroups.map(msg => msg.id);
+    if (expiredGroupIds.length > 0) {
+      await GroupMessage.destroy({ where: { id: { [Op.in]: expiredGroupIds } } });
+    }
+
+    const expiredPrivateIds = expiredPrivate.map(msg => msg.id);
+    if (expiredPrivateIds.length > 0) {
+      await Message.destroy({ where: { id: { [Op.in]: expiredPrivateIds } } });
+    }
   } catch (err) {
     console.error('[Cleanup] Error:', err);
   }
 }
 
-module.exports = (io) => {
+let ioInstance = null;
+
+const socketServiceMain = (io) => {
+  ioInstance = io;
+
+  // Clear zombie online users on server boot
+  User.update({ online: false }, { where: { online: true } }).catch(err => {
+    console.error('[SOCKET] Failed to reset online status on boot:', err);
+  });
+
   // Start cleanup interval (every 30 seconds)
   setInterval(() => cleanupExpiredMessages(io), 30000);
-  io.use((socket, next) => {
+
+  // Periodically sweep dead sockets that missed heartbeats (every 30 seconds)
+  setInterval(async () => {
+    const now = Date.now();
+    for (const [userId, lastPing] of heartbeats.entries()) {
+      if (now - lastPing > 90000) { // 90 seconds timeout
+        heartbeats.delete(userId);
+        const socketId = userSockets.get(userId);
+        userSockets.delete(userId);
+
+        await User.update({ online: false, lastSeenAt: new Date() }, { where: { id: userId } }).catch(() => {});
+
+        try {
+          const contactIds = await getContactIds(userId);
+          contactIds.forEach(contactId => {
+            io.to(`user:${contactId}`).emit('userStatusChange', { userId, online: false, lastSeenAt: new Date() });
+          });
+        } catch (e) {}
+
+        if (socketId) {
+          const s = io.sockets.sockets.get(socketId);
+          if (s) {
+            s.disconnect(true);
+          }
+        }
+      }
+    }
+  }, 30000);
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('Authentication error: token missing'));
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findByPk(decoded.userId, { 
+        attributes: ['id', 'tokenVersion', 'isBanned'] 
+      });
+      if (!user || user.tokenVersion !== decoded.tokenVersion) {
+        return next(new Error('Authentication error: token revoked'));
+      }
+      if (user.isBanned) {
+        return next(new Error('Authentication error: account banned'));
+      }
       socket.userId = decoded.userId;
       next();
     } catch (err) {
@@ -85,6 +165,7 @@ module.exports = (io) => {
   io.on('connection', async (socket) => {
     userSockets.set(socket.userId, socket.id);
     socket.join(`user:${socket.userId}`);
+    heartbeats.set(socket.userId, Date.now());
 
     await User.update({ online: true }, { where: { id: socket.userId } });
     try {
@@ -94,15 +175,21 @@ module.exports = (io) => {
       });
     } catch (e) {}
 
+    socket.on('heartbeat', () => {
+      heartbeats.set(socket.userId, Date.now());
+    });
+
     socket.on('joinGroup', async ({ groupId }) => {
       if (!groupId) return;
-      socket.join(`group:${groupId}`);
-      console.log(`[SOCKET] User ${socket.userId} joined room group:${groupId}`);
-      // Warm up membership cache
       try {
-        await getGroupMembers(groupId);
+        const members = await getGroupMembers(groupId);
+        if (!members.has(socket.userId)) {
+          return socket.emit('error', { message: 'Not a member of this group' });
+        }
+        socket.join(`group:${groupId}`);
+        console.log(`[SOCKET] User ${socket.userId} joined room group:${groupId}`);
       } catch (e) {
-        console.error('[SOCKET] Cache warmup failed:', e);
+        console.error('[SOCKET] joinGroup error:', e);
       }
     });
 
@@ -110,9 +197,13 @@ module.exports = (io) => {
       if (!groupId) return;
       socket.leave(`group:${groupId}`);
       console.log(`[SOCKET] User ${socket.userId} left room group:${groupId}`);
+      invalidateMembershipCache(groupId);
     });
 
     socket.on('sendGroupMessage', async (data) => {
+      if (!checkRateLimit(socket.userId, 'sendGroupMessage', 60)) {
+        return socket.emit('error', { message: 'Rate limit exceeded for messages' });
+      }
       try {
         const { groupId, encryptedContent, ratchetKey, n, pn, iv, replyToId, localId, type, signature, index } = data;
         
@@ -197,6 +288,9 @@ module.exports = (io) => {
     });
 
     socket.on('sendMessage', async (data) => {
+      if (!checkRateLimit(socket.userId, 'sendMessage', 60)) {
+        return socket.emit('error', { message: 'Rate limit exceeded for messages' });
+      }
       try {
         const { recipientId, encryptedContent, ratchetKey, n, pn, iv, replyToId, senderEk, usedOpk, localId, type } = data;
         
@@ -328,22 +422,38 @@ module.exports = (io) => {
     socket.on('deleteMessage', async ({ messageId, recipientId }) => {
       try {
         const msg = await Message.findByPk(messageId);
-        if (!msg || msg.senderId !== socket.userId) return;
+        if (!msg) return;
 
-        await msg.update({
-          isDeleted: true,
-          encryptedContent: null,
-          ratchetKey: null,
-          n: 0,
-          pn: 0,
-          iv: null,
-        });
+        const isSender = msg.senderId === socket.userId;
+        const isRecipient = msg.recipientId === socket.userId;
+        const isBurn = msg.type === 'burn';
 
-        const payload = { messageId, isDeleted: true };
-        socket.emit('messageDeleted', payload);
-        const recipientSocketId = userSockets.get(recipientId);
-        if (recipientSocketId) io.to(recipientSocketId).emit('messageDeleted', payload);
-      } catch (err) {}
+        if (!isSender && !(isRecipient && isBurn)) return;
+
+        if (isBurn) {
+          await msg.destroy();
+          const payload = { messageId, isDeleted: true, isBurn: true };
+          socket.emit('messageDeleted', payload);
+          const recipientSocketId = userSockets.get(recipientId);
+          if (recipientSocketId) io.to(recipientSocketId).emit('messageDeleted', payload);
+        } else {
+          await msg.update({
+            isDeleted: true,
+            encryptedContent: null,
+            ratchetKey: null,
+            n: 0,
+            pn: 0,
+            iv: null,
+          });
+
+          const payload = { messageId, isDeleted: true };
+          socket.emit('messageDeleted', payload);
+          const recipientSocketId = userSockets.get(recipientId);
+          if (recipientSocketId) io.to(recipientSocketId).emit('messageDeleted', payload);
+        }
+      } catch (err) {
+        console.error('[SOCKET] deleteMessage error:', err);
+      }
     });
 
     socket.on('pinMessage', async ({ messageId, recipientId, isPinned }) => {
@@ -357,10 +467,15 @@ module.exports = (io) => {
         socket.emit('messagePinned', payload);
         const recipientSocketId = userSockets.get(recipientId);
         if (recipientSocketId) io.to(recipientSocketId).emit('messagePinned', payload);
-      } catch (err) {}
+      } catch (err) {
+        console.error('[SOCKET] pinMessage error:', err);
+      }
     });
 
     socket.on('reactMessage', async ({ messageId, recipientId, reaction }) => {
+      if (!checkRateLimit(socket.userId, 'reactMessage', 60)) {
+        return socket.emit('error', { message: 'Rate limit exceeded' });
+      }
       try {
         const msg = await Message.findByPk(messageId);
         if (!msg || msg.isDeleted) return;
@@ -375,7 +490,9 @@ module.exports = (io) => {
         socket.emit('messageReacted', payload);
         const recipientSocketId = userSockets.get(recipientId);
         if (recipientSocketId) io.to(recipientSocketId).emit('messageReacted', payload);
-      } catch (err) {}
+      } catch (err) {
+        console.error('[SOCKET] reactMessage error:', err);
+      }
     });
 
     socket.on('deleteGroupMessage', async ({ messageId, groupId }) => {
@@ -383,20 +500,34 @@ module.exports = (io) => {
         const msg = await GroupMessage.findByPk(messageId);
         if (!msg || msg.groupId !== groupId) return;
         
-        // Only sender or potentially group admin (future) can delete
-        if (msg.senderId !== socket.userId) return;
+        const isSender = msg.senderId === socket.userId;
+        const isBurn = msg.type === 'burn';
 
-        await msg.update({
-          isDeleted: true,
-          encryptedContent: null,
-          ratchetKey: null,
-          n: 0,
-          pn: 0,
-          iv: null,
-        });
+        const member = await GroupMember.findOne({ where: { groupId, userId: socket.userId } });
+        const isAdmin = member?.role === 'admin';
 
-        io.to(`group:${groupId}`).emit('groupMessageDeleted', { messageId, isDeleted: true });
-      } catch (err) {}
+        if (!isSender && !isAdmin) return;
+
+        if (isBurn) {
+          await msg.destroy();
+          io.to(`group:${groupId}`).emit('groupMessageDeleted', { messageId, isDeleted: true, isBurn: true });
+          io.to(`group:${groupId}`).emit('messageDeleted', { messageId, isDeleted: true, isBurn: true });
+        } else {
+          await msg.update({
+            isDeleted: true,
+            encryptedContent: null,
+            ratchetKey: null,
+            n: 0,
+            pn: 0,
+            iv: null,
+          });
+
+          io.to(`group:${groupId}`).emit('groupMessageDeleted', { messageId, isDeleted: true });
+          io.to(`group:${groupId}`).emit('messageDeleted', { messageId, isDeleted: true });
+        }
+      } catch (err) {
+        console.error('[SOCKET] deleteGroupMessage error:', err);
+      }
     });
 
     socket.on('pinGroupMessage', async ({ messageId, groupId, isPinned }) => {
@@ -404,13 +535,24 @@ module.exports = (io) => {
         const msg = await GroupMessage.findByPk(messageId);
         if (!msg || msg.groupId !== groupId) return;
 
+        const member = await GroupMember.findOne({ where: { groupId, userId: socket.userId } });
+        if (!member || member.role !== 'admin') return;
+
         await msg.update({ isPinned });
         io.to(`group:${groupId}`).emit('groupMessagePinned', { messageId, isPinned });
-      } catch (err) {}
+      } catch (err) {
+        console.error('[SOCKET] pinGroupMessage error:', err);
+      }
     });
 
     socket.on('reactGroupMessage', async ({ messageId, groupId, reaction }) => {
+      if (!checkRateLimit(socket.userId, 'reactGroupMessage', 60)) {
+        return socket.emit('error', { message: 'Rate limit exceeded' });
+      }
       try {
+        const members = await getGroupMembers(groupId);
+        if (!members.has(socket.userId)) return;
+
         const msg = await GroupMessage.findByPk(messageId);
         if (!msg || msg.groupId !== groupId || msg.isDeleted) return;
 
@@ -420,12 +562,17 @@ module.exports = (io) => {
 
         await msg.update({ reactions: currentReactions });
         io.to(`group:${groupId}`).emit('groupMessageReacted', { messageId, reactions: currentReactions });
-      } catch (err) {}
+      } catch (err) {
+        console.error('[SOCKET] reactGroupMessage error:', err);
+      }
     });
 
     socket.on('markAsRead', async ({ senderId, groupId }) => {
       try {
         if (groupId) {
+          const members = await getGroupMembers(groupId);
+          if (!members.has(socket.userId)) return;
+
           // Group Read Status: Update GroupMember's lastReadMessageId to the latest message in group
           const lastMsg = await GroupMessage.findOne({
             where: { groupId },
@@ -455,6 +602,9 @@ module.exports = (io) => {
     });
 
     socket.on('groupTyping', async ({ groupId }) => {
+      if (!checkRateLimit(socket.userId, 'groupTyping', 60)) {
+        return socket.emit('error', { message: 'Rate limit exceeded' });
+      }
       if (!groupId) return;
       try {
         const members = await getGroupMembers(groupId);
@@ -464,9 +614,16 @@ module.exports = (io) => {
       } catch (e) {}
     });
 
-    socket.on('groupStopTyping', ({ groupId }) => {
+    socket.on('groupStopTyping', async ({ groupId }) => {
       if (!groupId) return;
-      socket.to(`group:${groupId}`).emit('groupStopTyping', { groupId, senderId: socket.userId });
+      try {
+        const members = await getGroupMembers(groupId);
+        if (members.has(socket.userId)) {
+          socket.to(`group:${groupId}`).emit('groupStopTyping', { groupId, senderId: socket.userId });
+        }
+      } catch (e) {
+        console.error('[SOCKET] groupStopTyping error:', e);
+      }
     });
 
     socket.on('typing', ({ recipientId }) => {
@@ -508,13 +665,44 @@ module.exports = (io) => {
 
     socket.on('disconnect', async () => {
       userSockets.delete(socket.userId);
+      heartbeats.delete(socket.userId);
+      
+      // Cleanup rate limit entries for disconnected user to prevent memory leak (L13-06)
+      for (const key of socketRateLimit.keys()) {
+        if (key.startsWith(`${socket.userId}:`)) {
+          socketRateLimit.delete(key);
+        }
+      }
+
       await User.update({ online: false, lastSeenAt: new Date() }, { where: { id: socket.userId } });
       try {
         const contactIds = await getContactIds(socket.userId);
         contactIds.forEach(contactId => {
           io.to(`user:${contactId}`).emit('userStatusChange', { userId: socket.userId, online: false, lastSeenAt: new Date() });
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error('[SOCKET] disconnect status notify error:', e);
+      }
     });
   });
 };
+
+function invalidateMembershipCache(groupId) {
+  membershipCache.delete(groupId);
+}
+
+socketServiceMain.invalidateMembershipCache = invalidateMembershipCache;
+socketServiceMain.getIO = () => ioInstance;
+socketServiceMain.getUserSocketId = (userId) => userSockets.get(userId);
+socketServiceMain.kickUserFromGroupRoom = (userId, groupId) => {
+  const socketId = userSockets.get(userId);
+  if (socketId && ioInstance) {
+    const socket = ioInstance.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.leave(`group:${groupId}`);
+      socket.emit('kickedFromGroup', { groupId });
+    }
+  }
+};
+
+module.exports = socketServiceMain;

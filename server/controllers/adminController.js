@@ -1,15 +1,43 @@
 const { User, Message, Group, GroupMember } = require('../models');
 const { Op } = require('sequelize');
 
-// Get all users with stats
+// Get all users with stats (paginated & searchable)
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.findAll({
+    const page = parseInt(req.query.page, 10) || 1;
+    const MAX_LIMIT = 100;
+    const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const search = req.query.search || '';
+
+    const offset = (page - 1) * limit;
+
+    const whereClause = {};
+    if (search) {
+      // Escape SQL LIKE wildcard characters to prevent ReDoS / Full Table Scan CPU spike
+      const escapedSearch = search.replace(/[%_]/g, '\\$&');
+      whereClause[Op.or] = [
+        { username: { [Op.iLike]: `%${escapedSearch}%` } },
+        { email: { [Op.iLike]: `%${escapedSearch}%` } }
+      ];
+    }
+
+    const { count, rows } = await User.findAndCountAll({
+      where: whereClause,
       attributes: ['id', 'username', 'email', 'role', 'isVerified', 'isBanned', 'createdAt', 'lastSeenAt', 'online'],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
+      limit,
+      offset
     });
-    res.json(users);
+
+    res.json({
+      users: rows,
+      total: count,
+      page,
+      totalPages: Math.ceil(count / limit),
+      limit
+    });
   } catch (error) {
+    console.error('[getAllUsers]', error);
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 };

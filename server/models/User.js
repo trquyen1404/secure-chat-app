@@ -65,6 +65,11 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  verificationAttempts: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    allowNull: false,
+  },
   isBanned: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
@@ -96,6 +101,10 @@ const User = sequelize.define('User', {
   tokenVersion: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
+  },
+  refreshTokens: {
+    type: DataTypes.JSONB,
+    defaultValue: [],
   },
   vaultData: {
     type: DataTypes.TEXT('long'),

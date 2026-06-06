@@ -63,6 +63,7 @@ const Register = () => {
   const [passphrase, setPassphrase] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
 
   const navigate = useNavigate();
 
@@ -77,10 +78,11 @@ const Register = () => {
   const handleRegister = async (e) => {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
 
     // Client-side guards
-    if (!/^[a-zA-Z0-0._%+-]+@(stu\.)?utt\.edu\.vn$/.test(email)) {
-      setError('Vui lòng sử dụng Email UTT hợp lệ (@stu.utt.edu.vn hoặc @utt.edu.vn)');
+    if (!/^[a-zA-Z0-9._%+-]+@(st\.)?utt\.edu\.vn$/.test(email)) {
+      setError('Vui lòng sử dụng Email UTT hợp lệ (@st.utt.edu.vn hoặc @utt.edu.vn)');
       return;
     }
 
@@ -170,7 +172,10 @@ const Register = () => {
       localStorage.setItem('hasIdentity', 'true'); // redundantly sync for easy checks
 
       console.log('[Registration] Keys successfully persisted to IndexedDB.');
-      navigate('/login');
+      setSuccess('Đăng ký thành công! Đang chuyển hướng đến trang đăng nhập...');
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
     } catch (err) {
       console.error('[Registration] Error during key generation or upload:', err);
       setError(err.response?.data?.error || 'Registration failed. Please try again.');
@@ -185,7 +190,7 @@ const Register = () => {
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-500/20 rounded-full blur-[120px] animate-pulse"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-purple-500/20 rounded-full blur-[120px] animate-pulse [animation-delay:2s]"></div>
 
-      <div className="relative z-10 w-full max-w-md glass p-10 rounded-[32px] premium-shadow border-[var(--glass-border)] animate-fade-in mx-4 my-10">
+      <div className="relative z-10 w-full max-w-md glass p-10 rounded-[32px] premium-shadow border-[var(--glass-border)] animate-fade-in mx-4 my-6 max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300/50 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600/50 [&::-webkit-scrollbar-thumb]:rounded-full">
         <div className="flex flex-col items-center mb-10">
           <div className="w-20 h-20 premium-gradient rounded-3xl flex items-center justify-center mb-6 shadow-2xl shadow-indigo-500/40 transform hover:-rotate-12 transition-transform duration-500">
             <ShieldCheck className="w-10 h-10 text-white" />
@@ -200,6 +205,13 @@ const Register = () => {
           <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-sm flex items-start gap-3 animate-shake">
             <XCircle className="w-5 h-5 mt-0.5 shrink-0" />
             <p className="font-semibold">{error}</p>
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-8 p-4 bg-green-500/10 border border-green-500/20 rounded-2xl text-green-500 text-sm flex items-start gap-3 animate-fade-in">
+            <CheckCircle2 className="w-5 h-5 mt-0.5 shrink-0" />
+            <p className="font-semibold">{success}</p>
           </div>
         )}
 
@@ -230,7 +242,7 @@ const Register = () => {
               type="email"
               required
               className="w-full px-5 py-4 bg-[var(--input-bg)] border border-transparent rounded-2xl focus:border-[var(--primary)]/30 focus:bg-[var(--bg-secondary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300 text-[var(--text-primary)] font-medium placeholder-[var(--text-secondary)]/50"
-              placeholder="sinhvien@stu.utt.edu.vn"
+              placeholder="sinhvien@st.utt.edu.vn"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />

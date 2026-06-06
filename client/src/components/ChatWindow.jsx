@@ -31,7 +31,8 @@ import {
   loadSession,
   saveSession,
   deleteSession,
-  searchMessages
+  searchMessages,
+  deleteDecryptedMessage
 } from '../utils/ratchetStore';
 import { getKey } from '../utils/keyStore';
 import { saveMySenderKey, loadMySenderKey, saveTheirSenderKey, loadTheirSenderKey } from '../utils/senderKeyStore';
@@ -243,17 +244,52 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
         let content = await getDecryptedMessage(msg.id, masterKey) || (msg.localId ? await getDecryptedMessage(msg.localId, masterKey) : null);
         if (!content || content.startsWith('[Chờ')) {
           try {
-            if (chatUser.isGroup) content = (await processGroupMessage(msg, masterKey, currentUser, chatUser.id)).content;
-            else {
+            if (chatUser.isGroup) {
+              content = (await processGroupMessage(msg, masterKey, currentUser, chatUser.id)).content;
+            } else {
               const sess = await loadSession(chatUser.id, masterKey);
-              content = sess ? await decryptHistoricalMessage(msg, masterKey, sess) : '[Mã hóa]';
+              let decrypted = sess ? await decryptHistoricalMessage(msg, masterKey, sess) : null;
+              if (!decrypted && msg.senderId !== currentUser.id) {
+                const result = await processIncomingMessage(msg, masterKey, currentUser, chatUser);
+                decrypted = result.content;
+                
+                if (result.success && result.content && msg.type === 'SENDER_KEY_DISTRIBUTION') {
+                  try {
+                    const dist = JSON.parse(result.content);
+                    await saveTheirSenderKey(dist.groupId, msg.senderId, {
+                      chainKeyB64: dist.chainKeyB64,
+                      signaturePublicKeyB64: dist.signaturePublicKeyB64,
+                      index: 0
+                    }, masterKey);
+                    console.log(`[E2EE-History] ✅ Restored Sender Key from ${msg.senderId} for group ${dist.groupId}.`);
+                  } catch (e) {
+                    console.error('[E2EE-History] Malformed SENDER_KEY_DISTRIBUTION in history', e);
+                  }
+                }
+              }
+              content = decrypted || '[Mã hóa]';
             }
           } catch { content = '[Lỗi giải mã]'; }
         }
         const member = groupMetadata?.members?.find(m => m.userId === msg.senderId);
+        const isBurn = msg.type === 'burn' || msg.burnOnRead;
+        
+        if (isBurn && msg.senderId !== currentUser.id) {
+          // Xóa khỏi local IndexedDB của người nhận
+          deleteDecryptedMessage(msg.id).catch(e => console.error('[ChatWindow] Failed to delete burn message:', e));
+          
+          // Báo server xóa vĩnh viễn tin nhắn tự hủy
+          if (chatUser?.isGroup) {
+            socket?.emit('deleteGroupMessage', { messageId: msg.id, groupId: chatUser.id });
+          } else {
+            socket?.emit('deleteMessage', { messageId: msg.id, recipientId: msg.senderId });
+          }
+        }
+
         decrypted.push({
           ...msg,
           decryptedContent: content || '[Mã hóa]',
+          burnOnRead: isBurn || msg.burnOnRead,
           senderName: member?.User?.username || 'Người dùng',
           status: msg.senderId === currentUser?.id ? 'sent' : 'received'
         });
@@ -264,11 +300,107 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
   };
 
   useEffect(() => {
-    if (chatUser?.id && token && !loading) {
+    if (chatUser?.id && token && !loading && masterKey) {
       if (chatUser.isGroup) fetchGroupMetadata().then(() => loadMessages());
       else loadMessages();
     }
-  }, [chatUser?.id, token, loading]);
+  }, [chatUser?.id, token, loading, masterKey]);
+
+  useEffect(() => {
+    if (!chatUser?.id || !masterKey) return;
+    const handleKeyReceived = (e) => {
+      if (chatUser.isGroup && e.detail.groupId === chatUser.id) {
+        console.log(`[ChatWindow] Sender key received for group ${chatUser.id}. Reloading messages...`);
+        loadMessages();
+      }
+    };
+    const handleSessionUpdated = (e) => {
+      if (!chatUser.isGroup && e.detail.userId === chatUser.id) {
+        console.log(`[ChatWindow] Session updated for ${chatUser.id}. Reloading messages...`);
+        loadMessages();
+      }
+    };
+    const handleMessageSynced = (e) => {
+      const msg = e.detail;
+      const targetId = msg.groupId || (msg.senderId === currentUser?.id ? msg.recipientId : msg.senderId);
+      if (targetId === chatUser.id) {
+        console.log(`[ChatWindow] Message synced for active chat. Updating state...`);
+        setMessages(prev => {
+          const exists = prev.some(m => m.id === msg.id || (m.localId && m.localId === msg.localId));
+          if (exists) {
+            return prev.map(m => {
+              if (m.id === msg.id || (m.localId && m.localId === msg.localId)) {
+                return { ...m, decryptedContent: msg.decryptedContent };
+              }
+              return m;
+            });
+          } else {
+            const member = groupMetadata?.members?.find(m => m.userId === msg.senderId);
+            const isBurn = msg.type === 'burn' || msg.burnOnRead;
+            const newMsg = {
+              ...msg,
+              decryptedContent: msg.decryptedContent,
+              burnOnRead: isBurn,
+              senderName: member?.User?.username || 'Người dùng',
+              status: msg.senderId === currentUser?.id ? 'sent' : 'received'
+            };
+            return [...prev, newMsg].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          }
+        });
+      }
+    };
+
+
+    window.addEventListener('senderkey_received', handleKeyReceived);
+    window.addEventListener('session_updated', handleSessionUpdated);
+    window.addEventListener('e2ee_message_synced', handleMessageSynced);
+    return () => {
+      window.removeEventListener('senderkey_received', handleKeyReceived);
+      window.removeEventListener('session_updated', handleSessionUpdated);
+      window.removeEventListener('e2ee_message_synced', handleMessageSynced);
+    };
+  }, [chatUser?.id, masterKey, currentUser?.id]);
+
+  const encryptAndSendOneToOne = async (recipientId, text, type = 'text', extra = {}) => {
+    let sess = await loadSession(recipientId, masterKey);
+    let firstEkB64 = null;
+    let firstOpkB64 = null;
+    if (!sess) {
+      const bundle = (await api.get(`/api/users/${recipientId}/prekey-bundle`)).data;
+      const ikDh = identityKeys?.dh || await getKey(`ik_dh_priv_${currentUser.id}`, masterKey);
+      const ek = await generateX25519KeyPair();
+      const { rootKey, sendChainKey, recvChainKey } = await x3dhInitiatorHandshake(
+        ikDh, 
+        ek.privateKey, 
+        bundle.identityKey.sign, 
+        bundle.identityKey.dh, 
+        bundle.signedPreKey.publicKey, 
+        bundle.signedPreKey.signature, 
+        bundle.oneTimePreKey?.publicKey
+      );
+      sess = { rootKey, sendChainKey, recvChainKey, nextSendIndex: 0, nextRecvIndex: 0, sendRatchetKeyPair: await generateX25519KeyPair(), status: 'ACTIVE' };
+      await saveSession(recipientId, sess, masterKey);
+      firstEkB64 = ek.publicKeyBase64;
+      firstOpkB64 = bundle.oneTimePreKey?.publicKey || null;
+    }
+    const { nextChainKey, messageKey } = await ratchetChain(sess.sendChainKey);
+    sess.sendChainKey = nextChainKey;
+    const enc = await encryptMessageGCM(text, messageKey, getAssociatedData(currentUser.id, recipientId));
+    const messageIndex = sess.nextSendIndex;
+    sess.nextSendIndex += 1;
+    await saveSession(recipientId, sess, masterKey);
+    socket.emit('sendMessage', { 
+      recipientId, 
+      encryptedContent: enc.ciphertextB64, 
+      iv: enc.ivB64, 
+      ratchetKey: sess.sendRatchetKeyPair.publicKeyBase64, 
+      n: messageIndex, 
+      type,
+      senderEk: firstEkB64,
+      usedOpk: firstOpkB64,
+      ...extra
+    });
+  };
 
   const handleSendMessage = async (e, forcedText = null) => {
     if (e) e.preventDefault();
@@ -286,8 +418,22 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           const newChain = await createSenderKeyChain(); sk = { ...newChain, index: 0 };
           await saveMySenderKey(chatUser.id, sk, masterKey);
           const payload = JSON.stringify({ groupId: chatUser.id, chainKeyB64: sk.chainKeyB64, signaturePublicKeyB64: sk.signaturePublicKeyB64 });
-          for (const m of groupMetadata.members.filter(m => m.userId !== currentUser.id)) {
-            await api.post(`/api/messages/distribute`, { recipientId: m.userId, payload });
+          
+          let currentMetadata = groupMetadata;
+          if (!currentMetadata) {
+            try {
+              const res = await api.get(`/api/groups/${chatUser.id}`);
+              currentMetadata = res.data;
+              setGroupMetadata(currentMetadata);
+            } catch (err) {
+              console.error('Failed to fetch group metadata during send:', err);
+            }
+          }
+          
+          if (currentMetadata && currentMetadata.members) {
+            for (const m of currentMetadata.members.filter(m => m.userId !== currentUser.id)) {
+               await encryptAndSendOneToOne(m.userId, payload, 'SENDER_KEY_DISTRIBUTION');
+            }
           }
         }
         const enc = await encryptGroupMessage(t, sk.chainKeyB64, sk.signaturePrivateKey, sk.index, chatUser.id);
@@ -299,36 +445,24 @@ const ChatWindow = ({ user: chatUser, onClose, showDetail, onToggleDetail }) => 
           index: enc.index, 
           signature: enc.signature, 
           localId, 
-          type: 'text',
+          type: burnOnRead ? 'burn' : 'text',
           burnOnRead
         });
       } else {
-        let sess = await loadSession(chatUser.id, masterKey);
-        if (!sess) {
-          const bundle = (await api.get(`/api/users/${chatUser.id}/prekey-bundle`)).data;
-          const ikDh = identityKeys?.dh || await getKey(`ik_dh_priv_${currentUser.id}`, masterKey);
-          const ek = await generateX25519KeyPair();
-          const { rootKey, sendChainKey, recvChainKey } = await x3dhInitiatorHandshake(ikDh, ek.privateKey, bundle.identityKey, bundle.identityKey, bundle.signedPreKey.publicKey, bundle.signedPreKey.signature, bundle.oneTimePreKey?.publicKey);
-          sess = { rootKey, sendChainKey, recvChainKey, nextSendIndex: 0, nextRecvIndex: 0, sendRatchetKeyPair: await generateX25519KeyPair(), status: 'ACTIVE' };
-          await saveSession(chatUser.id, sess, masterKey);
-        }
-        const { nextChainKey, messageKey } = await ratchetChain(sess.sendChainKey);
-        sess.sendChainKey = nextChainKey;
-        const enc = await encryptMessageGCM(t, messageKey, getAssociatedData(currentUser.id, chatUser.id));
-        await saveSession(chatUser.id, sess, masterKey);
-        socket.emit('sendMessage', { 
-          recipientId: chatUser.id, 
-          encryptedContent: enc.ciphertextB64, 
-          iv: enc.ivB64, 
-          ratchetKey: sess.sendRatchetKeyPair.publicKeyBase64, 
-          n: sess.nextSendIndex++, 
-          localId, 
-          type: 'text',
-          burnOnRead
-        });
+        await encryptAndSendOneToOne(chatUser.id, t, burnOnRead ? 'burn' : 'text', { localId, burnOnRead });
       }
-      await saveDecryptedMessage(localId, { text: t, senderId: currentUser.id, timestamp: new Date().toISOString() }, masterKey);
-    } catch (err) { console.error('Send Error:', err); }
+      if (!burnOnRead) {
+        await saveDecryptedMessage(localId, { text: t, senderId: currentUser.id, timestamp: new Date().toISOString() }, masterKey);
+      }
+    } catch (err) {
+      console.error('Send Error:', err);
+      if (err.response?.status === 404) {
+        alert('Không thể gửi tin nhắn: Người dùng này không tồn tại hoặc đã bị xóa khỏi hệ thống. Vui lòng làm mới danh sách bạn bè.');
+        try {
+          await deleteSession(chatUser.id);
+        } catch (e) {}
+      }
+    }
   };
 
   if (!chatUser || !currentUser) return <div className="flex-1 flex items-center justify-center">Loading...</div>;

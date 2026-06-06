@@ -18,7 +18,7 @@ export function getAssociatedData(id01, id02) {
   
   // Trace only if IDs are valid to avoid log spam during loading
   if (id1 && id2 && id1 !== id2) {
-    console.debug(`[CRYPTO-Audit] AD generated: "${ad}"`);
+    if (import.meta.env.DEV) console.debug(`[CRYPTO-Audit] AD generated: "${ad}"`);
   }
   return ad;
 }
@@ -161,7 +161,7 @@ export async function hkdfDerive(masterSecret, salt, info, length = 256) {
 
   const rawKey = await window.crypto.subtle.exportKey('raw', key);
   const fp = await getFingerprint(rawKey);
-  console.log(`[CRYPTO] Derived Key (Info: ${info}) Fingerprint: ${fp}`);
+  if (import.meta.env.DEV) console.log(`[CRYPTO] Derived Key (Info: ${info}) Fingerprint: ${fp}`);
   
   return key;
 }
@@ -184,8 +184,10 @@ export async function x3dhInitiatorHandshake(
   const bobIKdh_pub = await importX25519Public(bobIKdh_pub_b64);
   const bobSPK_pub = await importX25519Public(bobSPK_pub_b64);
 
-  console.log(`[X3DH-Audit] Peer Identity Key (IK): ${await getFingerprint(base64ToArrayBuffer(bobIKdh_pub_b64))}`);
-  console.log(`[X3DH-Audit] Peer Signed Prekey (SPK): ${await getFingerprint(base64ToArrayBuffer(bobSPK_pub_b64))}`);
+  if (import.meta.env.DEV) {
+    console.log(`[X3DH-Audit] Peer Identity Key (IK): ${await getFingerprint(base64ToArrayBuffer(bobIKdh_pub_b64))}`);
+    console.log(`[X3DH-Audit] Peer Signed Prekey (SPK): ${await getFingerprint(base64ToArrayBuffer(bobSPK_pub_b64))}`);
+  }
 
   const dh1 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: bobSPK_pub }, aliceIKdh_priv, 256);
   const dh2 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: bobIKdh_pub }, aliceEK_priv, 256);
@@ -208,7 +210,7 @@ export async function x3dhInitiatorHandshake(
   const sendChainKey = await hkdfDerive(rawRoot, null, 'SENDER_CHAIN_V1');
   const recvChainKey = await hkdfDerive(rawRoot, null, 'RECEIVER_CHAIN_V1');
 
-  console.log(`[X3DH-Init] Handshake Derived: Secret_FP=${secretFP}, Root_FP=${rootFP}`);
+  if (import.meta.env.DEV) console.log(`[X3DH-Init] Handshake Derived: Secret_FP=${secretFP}, Root_FP=${rootFP}`);
   return { rootKey, sendChainKey, recvChainKey };
 }
 
@@ -222,8 +224,10 @@ export async function x3dhResponderHandshake(
   const aliceIKdh_pub = await importX25519Public(aliceIKdh_pub_b64);
   const aliceEK_pub = await importX25519Public(aliceEK_pub_b64);
 
-  console.log(`[X3DH-Audit] Peer Identity Key (IK): ${await getFingerprint(base64ToArrayBuffer(aliceIKdh_pub_b64))}`);
-  console.log(`[X3DH-Audit] Peer Ephemeral Key (EK): ${await getFingerprint(base64ToArrayBuffer(aliceEK_pub_b64))}`);
+  if (import.meta.env.DEV) {
+    console.log(`[X3DH-Audit] Peer Identity Key (IK): ${await getFingerprint(base64ToArrayBuffer(aliceIKdh_pub_b64))}`);
+    console.log(`[X3DH-Audit] Peer Ephemeral Key (EK): ${await getFingerprint(base64ToArrayBuffer(aliceEK_pub_b64))}`);
+  }
 
   const dh1 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: aliceIKdh_pub }, bobSPK_priv, 256);
   const dh2 = await window.crypto.subtle.deriveBits({ name: 'X25519', public: aliceEK_pub }, bobIKdh_priv, 256);
@@ -245,7 +249,7 @@ export async function x3dhResponderHandshake(
   const sendChainKey = await hkdfDerive(rawRoot, null, 'RECEIVER_CHAIN_V1');
   const recvChainKey = await hkdfDerive(rawRoot, null, 'SENDER_CHAIN_V1');
 
-  console.log(`[X3DH-Resp] Handshake Derived: Secret_FP=${secretFP}, Root_FP=${rootFP}`);
+  if (import.meta.env.DEV) console.log(`[X3DH-Resp] Handshake Derived: Secret_FP=${secretFP}, Root_FP=${rootFP}`);
   return { rootKey, sendChainKey, recvChainKey };
 }
 
@@ -283,10 +287,12 @@ export async function encryptMessageGCM(plaintext, key, associatedData = null) {
   );
 
   const iv_fp = await getFingerprint(iv);
-  if (associatedData) {
-    console.log(`[CRYPTO-Audit] Encrypting (n=${plaintext?.n ?? '?'}) with AD: "${associatedData}" (IV FP: ${iv_fp})`);
-  } else {
-    console.log(`[CRYPTO-Audit] Encrypting (n=${plaintext?.n ?? '?'}) with IV FP: ${iv_fp}`);
+  if (import.meta.env.DEV) {
+    if (associatedData) {
+      console.log(`[CRYPTO-Audit] Encrypting (n=${plaintext?.n ?? '?'}) with AD: "${associatedData}" (IV FP: ${iv_fp})`);
+    } else {
+      console.log(`[CRYPTO-Audit] Encrypting (n=${plaintext?.n ?? '?'}) with IV FP: ${iv_fp}`);
+    }
   }
 
   return {
@@ -300,14 +306,18 @@ export async function decryptMessageGCM(ciphertextB64, ivB64, key, associatedDat
     const iv = base64ToArrayBuffer(ivB64);
     const data = base64ToArrayBuffer(ciphertextB64);
 
-    const iv_fp = await getFingerprint(iv);
-    
     const algorithm = { name: 'AES-GCM', iv };
     if (associatedData) {
       algorithm.additionalData = new TextEncoder().encode(associatedData);
-      console.log(`[CRYPTO-Audit] Decrypting (n=?) with AD: "${associatedData}" (IV FP: ${iv_fp})`);
-    } else {
-      console.log(`[CRYPTO-Audit] Decrypting (n=?) with IV FP: ${iv_fp}`);
+    }
+
+    if (import.meta.env.DEV) {
+      const iv_fp = await getFingerprint(iv);
+      if (associatedData) {
+        console.log(`[CRYPTO-Audit] Decrypting (n=?) with AD: "${associatedData}" (IV FP: ${iv_fp})`);
+      } else {
+        console.log(`[CRYPTO-Audit] Decrypting (n=?) with IV FP: ${iv_fp}`);
+      }
     }
 
     const decrypted = await window.crypto.subtle.decrypt(
@@ -324,7 +334,7 @@ export async function decryptMessageGCM(ciphertextB64, ivB64, key, associatedDat
 
 // ── PIN-based Identity Protection ─────────────────────
 
-export async function pbkdf2Derive(pin, salt, iterations = 100000) {
+export async function pbkdf2Derive(pin, salt, iterations = 600000) {
   const enc = new TextEncoder();
   const baseKey = await window.crypto.subtle.importKey(
     'raw',
@@ -361,7 +371,7 @@ export async function encryptData(plaintext, masterKey) {
     encoded
   );
 
-  console.debug(`[CRYPTO] Data encrypted. size=${ciphertext.byteLength}`);
+  if (import.meta.env.DEV) console.debug(`[CRYPTO] Data encrypted. size=${ciphertext.byteLength}`);
   return {
     ciphertextB64: arrayBufferToBase64(ciphertext),
     ivB64: arrayBufferToBase64(iv)
@@ -384,7 +394,7 @@ export async function decryptData(ciphertextB64, ivB64, masterKey) {
     );
     
     const decoded = new TextDecoder().decode(decrypted);
-    console.debug(`[CRYPTO] Data decrypted. length=${decoded.length}`);
+    if (import.meta.env.DEV) console.debug(`[CRYPTO] Data decrypted. length=${decoded.length}`);
     return decoded;
   } catch (err) {
     console.error(`[CRYPTO] Data decryption failed!`, err);
@@ -532,7 +542,7 @@ export async function serializeSession(session) {
   serialized.vaultTimestamp = Date.now();
 
   await Promise.all(keyPromises);
-  console.debug(`[CRYPTO-Serialize] Session for ${session.userId || 'unknown'} serialized. Index: ${session.nextRecvIndex}`);
+  if (import.meta.env.DEV) console.debug(`[CRYPTO-Serialize] Session for ${session.userId || 'unknown'} serialized. Index: ${session.nextRecvIndex}`);
   return serialized;
 }
 
@@ -629,9 +639,9 @@ export async function deserializeSession(serialized) {
 
   if (session.nextRecvIndex === undefined) {
     console.error('[E2EE-Deserialization] CRITICAL ERROR: nextRecvIndex is UNDEFINED after recovery.');
-    console.debug('[E2EE-Deserialization] Serialized object keys:', Object.keys(serialized));
+    if (import.meta.env.DEV) console.debug('[E2EE-Deserialization] Serialized object keys:', Object.keys(serialized));
   } else {
-    console.log(`[E2EE-Deserialization] session restored. nextRecvIndex: ${session.nextRecvIndex}, keys: ${missingKeys.length === 0 ? 'OK' : 'PARTIAL'}`);
+    if (import.meta.env.DEV) console.log(`[E2EE-Deserialization] session restored. nextRecvIndex: ${session.nextRecvIndex}, keys: ${missingKeys.length === 0 ? 'OK' : 'PARTIAL'}`);
   }
 
   return session;

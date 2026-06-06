@@ -29,7 +29,7 @@ const Exam = sequelize.define('Exam', {
 
 Exam.associate = (models) => {
   Exam.belongsTo(models.Group, { foreignKey: 'groupId' });
-  Exam.hasMany(models.Question, { foreignKey: 'examId', as: 'Questions' });
+  Exam.hasMany(models.Question, { foreignKey: 'examId', as: 'Questions', onDelete: 'CASCADE' });
 };
 
 module.exports = Exam;

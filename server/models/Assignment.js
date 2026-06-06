@@ -42,7 +42,7 @@ const Assignment = sequelize.define('Assignment', {
 Assignment.associate = (models) => {
   Assignment.belongsTo(models.Group, { foreignKey: 'groupId' });
   Assignment.belongsTo(models.User, { foreignKey: 'teacherId', as: 'Teacher' });
-  Assignment.hasMany(models.Submission, { foreignKey: 'assignmentId', as: 'Submissions' });
+  Assignment.hasMany(models.Submission, { foreignKey: 'assignmentId', as: 'Submissions', onDelete: 'CASCADE' });
 };
 
 module.exports = Assignment;

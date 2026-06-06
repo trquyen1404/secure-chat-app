@@ -18,14 +18,15 @@ const {
   getFolders
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
+const { validate, uploadPreKeysSchema, uploadOpksSchema } = require('../middleware/validation');
 
 const router = express.Router();
 
 router.get('/', auth, getUsers);
 router.get('/search', auth, require('../controllers/userController').searchUsers);
 router.get('/:userId/prekey-bundle', auth, getPreKeyBundle);
-router.post('/prekeys', auth, uploadPreKeys);
-router.post('/opks', auth, uploadOpks);
+router.post('/prekeys', auth, validate(uploadPreKeysSchema), uploadPreKeys);
+router.post('/opks', auth, validate(uploadOpksSchema), uploadOpks);
 router.post('/vault', auth, uploadVault);
 router.get('/vault', auth, downloadVault);
 

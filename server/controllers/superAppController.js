@@ -7,65 +7,158 @@ const {
   User 
 } = require('../models');
 
-// Generic CRUD helper
+// Generic CRUD helper with pagination safety
 const handleRequest = async (model, req, res, action = 'findAll', options = {}) => {
   try {
-    const result = await model[action](options);
+    const queryOptions = { ...options };
+    if (action === 'findAll') {
+      const page = Math.max(1, parseInt(req.query.page) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+      const offset = (page - 1) * limit;
+      queryOptions.limit = limit;
+      queryOptions.offset = offset;
+    }
+    const result = await model[action](queryOptions);
     res.json(result);
-  } catch (error) { res.status(500).json({ message: 'Error' }); }
+  } catch (error) { 
+    console.error(`[handleRequest] Error for action ${action}:`, error);
+    res.status(500).json({ message: 'Error' }); 
+  }
 };
 
 // --- ACADEMIC ---
 exports.getTutors = (req, res) => handleRequest(TutorRequest, req, res, 'findAll', { include: [User] });
 exports.createTutor = async (req, res) => {
-  const item = await TutorRequest.create({ ...req.body, userId: req.userId });
-  res.status(201).json(item);
+  try {
+    const { subject, description } = req.body;
+    const item = await TutorRequest.create({ 
+      subject, 
+      description, 
+      userId: req.userId,
+      status: 'open'
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
 };
 
 exports.getReviews = (req, res) => handleRequest(CourseReview, req, res);
 exports.createReview = async (req, res) => {
-  const item = await CourseReview.create({ ...req.body, userId: req.userId });
-  res.status(201).json(item);
+  try {
+    const { courseName, lecturerName, rating, content } = req.body;
+    const item = await CourseReview.create({ 
+      courseName, 
+      lecturerName, 
+      rating, 
+      content, 
+      userId: req.userId 
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
 };
 
 // --- CAMPUS ---
 exports.getCanteenOrders = (req, res) => handleRequest(CanteenOrder, req, res, 'findAll', { where: { userId: req.userId } });
 exports.createCanteenOrder = async (req, res) => {
-  const item = await CanteenOrder.create({ ...req.body, userId: req.userId });
-  res.status(201).json(item);
+  try {
+    const { items, totalPrice } = req.body;
+    const item = await CanteenOrder.create({ 
+      items, 
+      totalPrice, 
+      status: 'pending',
+      userId: req.userId 
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
 };
 
 exports.getLibraryBookings = (req, res) => handleRequest(LibraryBooking, req, res, 'findAll', { where: { userId: req.userId } });
 exports.createLibraryBooking = async (req, res) => {
-  const item = await LibraryBooking.create({ ...req.body, userId: req.userId });
-  res.status(201).json(item);
+  try {
+    const { seatNumber, startTime, endTime } = req.body;
+    const item = await LibraryBooking.create({ 
+      seatNumber, 
+      startTime, 
+      endTime, 
+      userId: req.userId 
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
 };
 
 // --- SOCIAL ---
 exports.getElections = (req, res) => handleRequest(Election, req, res);
 exports.voteElection = async (req, res) => {
   const { id, candidateId } = req.body;
-  const election = await Election.findByPk(id);
-  if (election && !election.voterIds.includes(req.userId)) {
+  const { sequelize } = require('../models');
+  const t = await sequelize.transaction();
+  try {
+    const election = await Election.findByPk(id, {
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (!election) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Already voted' });
+    }
+    if (election.voterIds.includes(req.userId)) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Already voted' });
+    }
+
     election.voterIds = [...election.voterIds, req.userId];
-    election.candidates = election.candidates.map(c => c.id === candidateId ? { ...c, votes: c.votes + 1 } : c);
-    await election.save();
-    return res.json(election);
+    election.candidates = election.candidates.map(c => c.id === candidateId ? { ...c, votes: (c.votes || 0) + 1 } : c);
+    
+    election.changed('voterIds', true);
+    election.changed('candidates', true);
+
+    await election.save({ transaction: t });
+    await t.commit();
+    res.json(election);
+  } catch (err) {
+    await t.rollback();
+    console.error('Vote election error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
-  res.status(400).json({ message: 'Already voted' });
 };
 
 // --- UTILITIES ---
 exports.getExpenses = (req, res) => handleRequest(Expense, req, res, 'findAll', { where: { userId: req.userId } });
 exports.createExpense = async (req, res) => {
-  const item = await Expense.create({ ...req.body, userId: req.userId });
-  res.status(201).json(item);
+  try {
+    const { title, amount, category, date } = req.body;
+    const item = await Expense.create({ 
+      title, 
+      amount, 
+      category, 
+      date: date || new Date(), 
+      userId: req.userId 
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
 };
 
 exports.getDiary = (req, res) => handleRequest(DiaryEntry, req, res, 'findAll', { where: { userId: req.userId } });
 exports.createDiary = async (req, res) => {
-  const item = await DiaryEntry.create({ ...req.body, userId: req.userId });
-  res.status(201).json(item);
+  try {
+    const { content } = req.body;
+    const item = await DiaryEntry.create({ 
+      content, 
+      userId: req.userId 
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
 };
 
 // --- ULTIMATE ---

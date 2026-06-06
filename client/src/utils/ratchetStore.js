@@ -1,17 +1,34 @@
 import { encryptData, decryptData, serializeSession, deserializeSession } from './crypto';
 
-const DB_NAME = 'secure-chat-ratchet';
 const DB_VERSION = 2;
 const STORE_SESSIONS = 'sessions';
 const STORE_MESSAGES = 'decrypted_messages';
 
 let dbHandle = null;
 
+function getDBName() {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      if (user && user.id) {
+        return `secure-chat-ratchet-${user.id}`;
+      }
+    }
+  } catch (e) {}
+  return 'secure-chat-ratchet';
+}
+
 export async function initRatchetDB() {
-  if (dbHandle) return dbHandle;
+  const currentDbName = getDBName();
+  if (dbHandle && dbHandle.name === currentDbName) return dbHandle;
+  if (dbHandle) {
+    dbHandle.close();
+    dbHandle = null;
+  }
   
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(currentDbName, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_SESSIONS)) {
@@ -162,6 +179,21 @@ export async function deleteSession(userId) {
 }
 
 /**
+ * Deletes a specific decrypted message from local store.
+ */
+export async function deleteDecryptedMessage(id) {
+  if (!id) return;
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readwrite');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
  * Rapidly restores a collection of messages within a single transaction.
  * [Performance] Parallelizes encryption before the transaction starts to avoid blocking the DB.
  */
@@ -289,7 +321,8 @@ export async function clearRatchetDB() {
       console.error('[STORE] Critical failure during clearRatchetDB:', err);
       // Fallback: If transaction fails, try deleting the whole DB as a last resort
       closeRatchetDB();
-      const request = indexedDB.deleteDatabase(DB_NAME);
+      const currentDbName = getDBName();
+      const request = indexedDB.deleteDatabase(currentDbName);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     }
@@ -348,6 +381,17 @@ export async function searchMessages(query, masterKey, filterChatId = null, isGr
       }
       resolve(results.sort((a, b) => b.timestamp - a.timestamp));
     };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getAllMessages() {
+  const db = await initRatchetDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_MESSAGES, 'readonly');
+    const store = transaction.objectStore(STORE_MESSAGES);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
   });
 }

@@ -38,7 +38,7 @@ const AttendanceSession = sequelize.define('AttendanceSession', {
 AttendanceSession.associate = (models) => {
   AttendanceSession.belongsTo(models.Group, { foreignKey: 'groupId' });
   AttendanceSession.belongsTo(models.User, { foreignKey: 'creatorId', as: 'Creator' });
-  AttendanceSession.hasMany(models.AttendanceRecord, { foreignKey: 'sessionId', as: 'Records' });
+  AttendanceSession.hasMany(models.AttendanceRecord, { foreignKey: 'sessionId', as: 'Records', onDelete: 'CASCADE' });
 };
 
 module.exports = AttendanceSession;

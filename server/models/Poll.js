@@ -42,8 +42,8 @@ const Poll = sequelize.define('Poll', {
 Poll.associate = (models) => {
   Poll.belongsTo(models.Group, { foreignKey: 'groupId' });
   Poll.belongsTo(models.User, { foreignKey: 'creatorId', as: 'Creator' });
-  Poll.hasMany(models.PollOption, { foreignKey: 'pollId', as: 'Options' });
-  Poll.hasMany(models.PollVote, { foreignKey: 'pollId', as: 'Votes' });
+  Poll.hasMany(models.PollOption, { foreignKey: 'pollId', as: 'Options', onDelete: 'CASCADE' });
+  Poll.hasMany(models.PollVote, { foreignKey: 'pollId', as: 'Votes', onDelete: 'CASCADE' });
 };
 
 module.exports = Poll;

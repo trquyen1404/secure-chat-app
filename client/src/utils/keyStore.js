@@ -1,19 +1,46 @@
 import { encryptData, decryptData, arrayBufferToBase64, base64ToArrayBuffer } from './crypto';
 
-const DB_NAME = 'SecureChatKeyStore';
 const DB_VERSION = 2; // Incremented for encryption support
 const STORE_NAME = 'keys';
 
+let dbHandle = null;
+
+function getDBName() {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      if (user && user.id) {
+        return `SecureChatKeyStore-${user.id}`;
+      }
+    }
+  } catch (e) {}
+  return 'SecureChatKeyStore';
+}
+
 function openDB() {
+  const currentDbName = getDBName();
+  if (dbHandle && dbHandle.name === currentDbName) return Promise.resolve(dbHandle);
+  if (dbHandle) {
+    dbHandle.close();
+    dbHandle = null;
+  }
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(currentDbName, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
       }
     };
-    req.onsuccess = (e) => resolve(e.target.result);
+    req.onsuccess = (e) => {
+      dbHandle = e.target.result;
+      dbHandle.onversionchange = () => {
+        dbHandle.close();
+        dbHandle = null;
+      };
+      resolve(dbHandle);
+    };
     req.onerror = (e) => reject(e.target.error);
   });
 }
@@ -95,18 +122,19 @@ export async function deleteKey(keyId) {
 }
 
 export async function clearKeyStore() {
+  const currentDbName = getDBName();
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(DB_NAME);
+    const req = indexedDB.deleteDatabase(currentDbName);
     req.onsuccess = () => {
-      console.log(`[KeyStore] Database ${DB_NAME} deleted successfully.`);
+      console.log(`[KeyStore] Database ${currentDbName} deleted successfully.`);
       resolve();
     };
     req.onerror = (e) => {
-      console.error(`[KeyStore] Failed to delete database ${DB_NAME}:`, e.target.error);
+      console.error(`[KeyStore] Failed to delete database ${currentDbName}:`, e.target.error);
       reject(e.target.error);
     };
     req.onblocked = () => {
-      console.warn(`[KeyStore] Deletion of ${DB_NAME} is blocked. Close other tabs.`);
+      console.warn(`[KeyStore] Deletion of ${currentDbName} is blocked. Close other tabs.`);
       resolve();
     };
   });

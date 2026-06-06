@@ -18,25 +18,66 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [limit, setLimit] = useState(50);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+
+  // Debounce search input
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 500);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchTerm]);
+
+  const fetchUsers = async (page = 1, search = '') => {
+    try {
+      const res = await api.get('/api/admin/users', {
+        params: { page, limit, search }
+      });
+      setUsers(res.data.users);
+      setTotalUsers(res.data.total);
+      setTotalPages(res.data.totalPages);
+      setCurrentPage(res.data.page);
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+    }
+  };
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  // Sync users whenever page or search query updates
+  useEffect(() => {
+    fetchUsers(currentPage, debouncedSearchTerm);
+  }, [currentPage, debouncedSearchTerm]);
+
+  // Reset to page 1 when search query changes
+  useEffect(() => {
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  }, [debouncedSearchTerm]);
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [statsRes, usersRes, logsRes] = await Promise.all([
+      const [statsRes, logsRes] = await Promise.all([
         api.get('/api/admin/stats'),
-        api.get('/api/admin/users'),
         api.get('/api/admin/logs')
       ]);
       setStats(statsRes.data);
-      setUsers(usersRes.data);
       setLogs(logsRes.data);
+      await fetchUsers(currentPage, debouncedSearchTerm);
     } catch (err) {
       console.error('Failed to fetch admin data:', err);
     } finally {
@@ -53,7 +94,7 @@ const AdminDashboard = () => {
         isBanned: !currentStatus,
         banReason: reason 
       });
-      fetchData(); // Refresh list
+      fetchUsers(currentPage, debouncedSearchTerm); // Refresh list only
     } catch (err) {
       alert('Lỗi khi thực hiện thao tác');
     }
@@ -65,16 +106,13 @@ const AdminDashboard = () => {
     try {
       const res = await api.post(`/api/admin/users/${userId}/reset`);
       alert(res.data.message || 'Đã khôi phục tài khoản thành công.');
-      fetchData();
+      fetchUsers(currentPage, debouncedSearchTerm); // Refresh list only
     } catch (err) {
       alert('Lỗi khi khôi phục tài khoản: ' + (err.response?.data?.error || err.message));
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.username.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    u.email?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = users;
 
   const COLORS = ['#0054a6', '#f47920', '#10b981', '#ef4444'];
 
@@ -314,6 +352,47 @@ const AdminDashboard = () => {
                       ))}
                     </tbody>
                   </table>
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between px-8 py-4 bg-[var(--hover)] border-t border-[var(--border)] rounded-b-[2.5rem]">
+                      <span className="text-xs text-[var(--text-secondary)] font-medium">
+                        Hiển thị {users.length} trên {totalUsers} người dùng
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setCurrentPage(1)}
+                          disabled={currentPage === 1}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-primary)] hover:bg-[var(--border)] text-[var(--text-primary)] disabled:opacity-50 disabled:pointer-events-none transition-all border border-[var(--border)] shadow-sm"
+                        >
+                          Đầu
+                        </button>
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPage === 1}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-primary)] hover:bg-[var(--border)] text-[var(--text-primary)] disabled:opacity-50 disabled:pointer-events-none transition-all border border-[var(--border)] shadow-sm"
+                        >
+                          Trước
+                        </button>
+                        <span className="text-xs font-bold px-3 py-1.5 bg-[var(--bg-accent)] text-[var(--text-primary)] rounded-lg border border-[var(--border)] shadow-inner">
+                          Trang {currentPage} / {totalPages}
+                        </span>
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-primary)] hover:bg-[var(--border)] text-[var(--text-primary)] disabled:opacity-50 disabled:pointer-events-none transition-all border border-[var(--border)] shadow-sm"
+                        >
+                          Sau
+                        </button>
+                        <button
+                          onClick={() => setCurrentPage(totalPages)}
+                          disabled={currentPage === totalPages}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-primary)] hover:bg-[var(--border)] text-[var(--text-primary)] disabled:opacity-50 disabled:pointer-events-none transition-all border border-[var(--border)] shadow-sm"
+                        >
+                          Cuối
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

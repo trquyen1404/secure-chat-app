@@ -45,9 +45,19 @@ const Group = sequelize.define('Group', {
 });
 
 Group.associate = (models) => {
-  Group.hasMany(models.GroupMember, { foreignKey: 'groupId', as: 'Members' });
-  Group.belongsToMany(models.User, { through: models.GroupMember, foreignKey: 'groupId', otherKey: 'userId', as: 'Users' });
-  Group.hasMany(models.GroupMessage, { foreignKey: 'groupId', as: 'Messages' });
+  Group.hasMany(models.GroupMember, { foreignKey: 'groupId', as: 'Members', onDelete: 'CASCADE' });
+  Group.belongsToMany(models.User, { through: models.GroupMember, foreignKey: 'groupId', otherKey: 'userId', as: 'Users', onDelete: 'CASCADE' });
+  Group.hasMany(models.GroupMessage, { foreignKey: 'groupId', as: 'Messages', onDelete: 'CASCADE' });
+  Group.hasMany(models.Poll, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Assignment, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Note, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Resource, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.AttendanceSession, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Announcement, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Grade, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.FlashcardSet, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Exam, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+  Group.hasMany(models.Confession, { foreignKey: 'groupId', onDelete: 'CASCADE' });
 };
 
 module.exports = Group;

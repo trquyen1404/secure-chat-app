@@ -1,4 +1,4 @@
-const { AttendanceSession, AttendanceRecord, User, Group } = require('../models');
+const { AttendanceSession, AttendanceRecord, User, Group, GroupMember } = require('../models');
 const crypto = require('crypto');
 const notificationService = require('../services/notificationService');
 
@@ -6,6 +6,12 @@ exports.createSession = async (req, res) => {
   try {
     const { groupId, title, durationMinutes } = req.body;
     const creatorId = req.userId;
+
+    // Check permissions: creator must be a teacher OR group admin
+    const member = await GroupMember.findOne({ where: { groupId, userId: creatorId } });
+    if (!member || (member.role !== 'admin' && req.user.role !== 'teacher')) {
+      return res.status(403).json({ error: 'Chỉ giảng viên hoặc quản trị viên nhóm mới có quyền thực hiện hành động này.' });
+    }
 
     const expiresAt = new Date(Date.now() + durationMinutes * 60000);
 
@@ -44,6 +50,12 @@ exports.submitAttendance = async (req, res) => {
     const session = await AttendanceSession.findByPk(sessionId);
     if (!session || !session.isActive || new Date() > session.expiresAt) {
       return res.status(400).json({ message: 'Attendance session is closed or expired' });
+    }
+
+    // Verify membership: student must be in the group of this session
+    const isMember = await GroupMember.findOne({ where: { groupId: session.groupId, userId } });
+    if (!isMember) {
+      return res.status(403).json({ error: 'Truy cập bị từ chối: Bạn không phải thành viên của nhóm học tập này.' });
     }
 
     // Verify digital signature
@@ -89,6 +101,9 @@ exports.submitAttendance = async (req, res) => {
 
       res.status(201).json(record);
     } catch (verifyError) {
+      if (verifyError.name === 'SequelizeUniqueConstraintError') {
+        throw verifyError;
+      }
       console.error('Signature verification error:', verifyError);
       return res.status(401).json({ message: 'Invalid signature format or verification error' });
     }

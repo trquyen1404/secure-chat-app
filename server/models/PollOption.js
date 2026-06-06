@@ -21,7 +21,7 @@ const PollOption = sequelize.define('PollOption', {
 
 PollOption.associate = (models) => {
   PollOption.belongsTo(models.Poll, { foreignKey: 'pollId' });
-  PollOption.hasMany(models.PollVote, { foreignKey: 'optionId', as: 'Votes' });
+  PollOption.hasMany(models.PollVote, { foreignKey: 'optionId', as: 'Votes', onDelete: 'CASCADE' });
 };
 
 module.exports = PollOption;

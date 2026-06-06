@@ -7,7 +7,7 @@ const GroupMember = require('../models/GroupMember');
  */
 const requireGroupMembership = async (req, res, next) => {
   try {
-    const { groupId } = req.params;
+    const groupId = req.params.groupId || req.body.groupId || req.query.groupId;
     if (!groupId || groupId === 'undefined') return res.status(400).json({ error: 'groupId is required' });
 
     // Simple UUID check to prevent DB errors

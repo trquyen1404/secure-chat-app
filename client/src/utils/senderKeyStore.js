@@ -1,17 +1,34 @@
 import { encryptData, decryptData } from './crypto';
 import { serializeSenderKey, deserializeSenderKey } from './senderKeyLogic';
 
-const DB_NAME = 'secure-chat-sender-keys';
 const DB_VERSION = 1;
 const STORE_MY_KEYS = 'my_keys';
 const STORE_THEIR_KEYS = 'their_keys';
 
 let dbHandle = null;
 
+function getDBName() {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      if (user && user.id) {
+        return `secure-chat-sender-keys-${user.id}`;
+      }
+    }
+  } catch (e) {}
+  return 'secure-chat-sender-keys';
+}
+
 export async function initSenderKeyDB() {
-  if (dbHandle) return dbHandle;
+  const currentDbName = getDBName();
+  if (dbHandle && dbHandle.name === currentDbName) return dbHandle;
+  if (dbHandle) {
+    dbHandle.close();
+    dbHandle = null;
+  }
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(currentDbName, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_MY_KEYS)) {
@@ -23,6 +40,10 @@ export async function initSenderKeyDB() {
     };
     request.onsuccess = () => {
       dbHandle = request.result;
+      dbHandle.onversionchange = () => {
+        dbHandle.close();
+        dbHandle = null;
+      };
       resolve(dbHandle);
     };
     request.onerror = () => reject(request.error);
@@ -159,8 +180,9 @@ export async function clearSenderKeyDB() {
     dbHandle.close();
     dbHandle = null;
   }
+  const currentDbName = getDBName();
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(DB_NAME);
+    const req = indexedDB.deleteDatabase(currentDbName);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });

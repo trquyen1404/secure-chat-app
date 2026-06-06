@@ -36,15 +36,15 @@ exports.register = async (req, res) => {
       phone
     } = req.body;
     
-    console.log('[Register-Trace] Start. Username:', username, 'Email:', email);
+    if (process.env.NODE_ENV !== 'production') console.log('[Register-Trace] Start. Username:', username, 'Email:', email);
 
     // --- Input Validation ---
     if (!username || username.length < 3) {
       return res.status(400).json({ error: 'Username must be at least 3 characters' });
     }
 
-    if (!email || !/^[a-zA-Z0-9._%+-]+@(stu\.)?utt\.edu\.vn$/.test(email)) {
-      return res.status(400).json({ error: 'Vui lòng sử dụng Email UTT hợp lệ (@stu.utt.edu.vn hoặc @utt.edu.vn)' });
+    if (!email || !/^[a-zA-Z0-9._%+-]+@(st\.)?utt\.edu\.vn$/.test(email)) {
+      return res.status(400).json({ error: 'Vui lòng sử dụng Email UTT hợp lệ (@st.utt.edu.vn hoặc @utt.edu.vn)' });
     }
 
     const existingUser = await User.findOne({ where: { username } });
@@ -59,18 +59,20 @@ exports.register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
     
-    // Auto-role assignment based on email domain
-    const role = email.endsWith('@utt.edu.vn') && !email.includes('@stu.utt.edu.vn') ? 'teacher' : 'student';
-    console.log('[Register-Trace] Password hashed. Role assigned:', role);
+    // Auto-role assignment based on email domain (strictly parsing the domain)
+    const emailParts = email.split('@');
+    const domain = emailParts[emailParts.length - 1].toLowerCase();
+    const role = domain === 'utt.edu.vn' ? 'teacher' : 'student';
+    if (process.env.NODE_ENV !== 'production') console.log('[Register-Trace] Password hashed. Role assigned:', role);
 
-    // Generate 6-digit verification code
-    const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
-    const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    // Generate 6-digit verification code using CSPRNG
+    const verificationToken = crypto.randomInt(100000, 1000000).toString();
+    const verificationTokenExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
     // Create user and its prekeys in a transaction
-    console.log('[Register-Trace] Entering transaction...');
+    if (process.env.NODE_ENV !== 'production') console.log('[Register-Trace] Entering transaction...');
     const user = await User.sequelize.transaction(async (t) => {
-      console.log('[Register-Trace] Creating User...');
+      if (process.env.NODE_ENV !== 'production') console.log('[Register-Trace] Creating User...');
       const newUser = await User.create({ 
         username, 
         email,
@@ -83,8 +85,8 @@ exports.register = async (req, res) => {
         encryptedPrivateKey: encryptedPrivateKey || null,
         keyBackupSalt: keyBackupSalt || null,
         keyBackupIv: keyBackupIv || null,
-        studentId: studentId || null,
-        teacherId: teacherId || null,
+        studentId: role === 'student' ? (studentId || null) : null,
+        teacherId: role === 'teacher' ? (teacherId || null) : null,
         phone: phone || null
       }, { transaction: t });
 
@@ -109,7 +111,10 @@ exports.register = async (req, res) => {
 
     // Send verification email
     await mailService.sendVerificationCode(email, verificationToken);
-    console.log(`[VERIFICATION] Code for ${email}: ${verificationToken}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`[VERIFICATION] Code for ${email}: ${verificationToken}`);
+
+    const tokenId = crypto.randomUUID();
+    const familyId = crypto.randomUUID();
 
     const token = jwt.sign(
       { userId: user.id, role: user.role, tokenVersion: user.tokenVersion }, 
@@ -117,10 +122,21 @@ exports.register = async (req, res) => {
       { expiresIn: JWT_EXPIRES }
     );
     const refreshToken = jwt.sign(
-      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      { userId: user.id, tokenId, familyId, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 
       { expiresIn: JWT_REFRESH_EXPIRES }
     );
+
+    const activeTokens = user.refreshTokens || [];
+    activeTokens.push({
+      tokenId,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      isRevoked: false
+    });
+    user.refreshTokens = activeTokens;
+    user.changed('refreshTokens', true);
+    await user.save();
 
     setRefreshTokenCookie(res, refreshToken);
 
@@ -168,16 +184,30 @@ exports.login = async (req, res) => {
       return res.status(403).json({ error: 'Tài khoản của bạn đã bị khóa', reason: user.banReason });
     }
 
+    const tokenId = crypto.randomUUID();
+    const familyId = crypto.randomUUID();
+
     const token = jwt.sign(
       { userId: user.id, role: user.role, tokenVersion: user.tokenVersion }, 
       JWT_SECRET, 
       { expiresIn: JWT_EXPIRES }
     );
     const refreshToken = jwt.sign(
-      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      { userId: user.id, tokenId, familyId, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 
       { expiresIn: JWT_REFRESH_EXPIRES }
     );
+
+    const activeTokens = user.refreshTokens || [];
+    activeTokens.push({
+      tokenId,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      isRevoked: false
+    });
+    user.refreshTokens = activeTokens;
+    user.changed('refreshTokens', true);
+    await user.save();
 
     setRefreshTokenCookie(res, refreshToken);
 
@@ -218,16 +248,60 @@ exports.refresh = async (req, res) => {
       return res.status(401).json({ error: 'Refresh Token không hợp lệ hoặc đã bị thu hồi' });
     }
 
+    const activeTokens = user.refreshTokens || [];
+    const tokenRecord = activeTokens.find(t => t.tokenId === decoded.tokenId);
+
+    // Phát hiện Token Reuse
+    if (!tokenRecord || tokenRecord.isRevoked) {
+      if (decoded.familyId) {
+        // Vô hiệu hoá toàn bộ familyId này
+        activeTokens.forEach(t => {
+          if (t.familyId === decoded.familyId) {
+            t.isRevoked = true;
+          }
+        });
+        user.refreshTokens = activeTokens;
+        user.changed('refreshTokens', true);
+        await user.save();
+      }
+      return res.status(401).json({ error: 'Refresh Token đã bị sử dụng lại. Toàn bộ phiên liên quan đã bị thu hồi.' });
+    }
+
+    // Token đã hết hạn chưa?
+    if (new Date(tokenRecord.expiresAt) < new Date()) {
+      return res.status(401).json({ error: 'Refresh Token đã hết hạn' });
+    }
+
+    // Đánh dấu tokenRecord cũ đã được sử dụng (isRevoked = true)
+    tokenRecord.isRevoked = true;
+
+    // Sinh ra tokenId mới cho Refresh Token tiếp theo
+    const newTokenId = crypto.randomUUID();
+    const familyId = decoded.familyId || crypto.randomUUID();
+
     const newAccessToken = jwt.sign(
       { userId: user.id, role: user.role, tokenVersion: user.tokenVersion }, 
       JWT_SECRET, 
       { expiresIn: JWT_EXPIRES }
     );
     const newRefreshToken = jwt.sign(
-      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      { userId: user.id, tokenId: newTokenId, familyId, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 
       { expiresIn: JWT_REFRESH_EXPIRES }
     );
+
+    // Thêm token mới và dọn dẹp các token hết hạn
+    activeTokens.push({
+      tokenId: newTokenId,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      isRevoked: false
+    });
+
+    const now = new Date();
+    user.refreshTokens = activeTokens.filter(t => new Date(t.expiresAt) > now);
+    user.changed('refreshTokens', true);
+    await user.save();
 
     setRefreshTokenCookie(res, newRefreshToken);
     res.json({ 
@@ -238,8 +312,7 @@ exports.refresh = async (req, res) => {
         isVerified: user.isVerified,
         studentId: user.studentId,
         teacherId: user.teacherId,
-        phone: user.phone,
-        role: user.role
+        phone: user.phone
       }
     });
   } catch (err) {
@@ -248,12 +321,27 @@ exports.refresh = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (refreshToken) {
+      const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+      const user = await User.findByPk(decoded.userId);
+      if (user) {
+        const activeTokens = user.refreshTokens || [];
+        user.refreshTokens = activeTokens.filter(t => t.tokenId !== decoded.tokenId);
+        user.changed('refreshTokens', true);
+        await user.save();
+      }
+    }
+  } catch (error) {
+    // Silent catch if token invalid/expired during logout
+  }
+
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
   });
-  // Optional: await User.increment('tokenVersion', { where: { id: req.userId }}); if we want global logout
   res.json({ message: 'Đăng xuất thành công' });
 };
 
@@ -266,6 +354,9 @@ exports.revokeAllOtherDevices = async (req, res) => {
     await user.increment('tokenVersion');
     await user.reload();
 
+    const tokenId = crypto.randomUUID();
+    const familyId = crypto.randomUUID();
+
     // Issue new tokens for the CURRENT device so it stays logged in
     const newAccessToken = jwt.sign(
       { userId: user.id, role: user.role, tokenVersion: user.tokenVersion }, 
@@ -273,10 +364,20 @@ exports.revokeAllOtherDevices = async (req, res) => {
       { expiresIn: JWT_EXPIRES }
     );
     const newRefreshToken = jwt.sign(
-      { userId: user.id, tokenVersion: user.tokenVersion }, 
+      { userId: user.id, tokenId, familyId, tokenVersion: user.tokenVersion }, 
       JWT_REFRESH_SECRET, 
       { expiresIn: JWT_REFRESH_EXPIRES }
     );
+
+    // Save only the new refresh token in user's refreshTokens array
+    user.refreshTokens = [{
+      tokenId,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      isRevoked: false
+    }];
+    user.changed('refreshTokens', true);
+    await user.save();
 
     setRefreshTokenCookie(res, newRefreshToken);
 
@@ -299,17 +400,31 @@ exports.verifyEmail = async (req, res) => {
 
     if (user.isVerified) return res.json({ message: 'Tài khoản đã được xác thực' });
 
-    if (user.verificationToken !== code) {
-      return res.status(400).json({ error: 'Mã xác thực không chính xác' });
+    if (!user.verificationToken || !user.verificationTokenExpires) {
+      return res.status(400).json({ error: 'Mã xác thực không tồn tại hoặc đã bị hủy. Vui lòng gửi lại mã mới.' });
     }
 
     if (new Date() > user.verificationTokenExpires) {
       return res.status(400).json({ error: 'Mã xác thực đã hết hạn' });
     }
 
+    if (user.verificationToken !== code) {
+      user.verificationAttempts += 1;
+      if (user.verificationAttempts >= 5) {
+        user.verificationToken = null;
+        user.verificationTokenExpires = null;
+        user.verificationAttempts = 0;
+        await user.save();
+        return res.status(400).json({ error: 'Mã xác thực đã bị hủy do nhập sai quá 5 lần. Vui lòng gửi lại mã mới.' });
+      }
+      await user.save();
+      return res.status(400).json({ error: 'Mã xác thực không chính xác' });
+    }
+
     user.isVerified = true;
     user.verificationToken = null;
     user.verificationTokenExpires = null;
+    user.verificationAttempts = 0;
     await user.save();
 
     res.json({ message: 'Xác thực email thành công!', user: { id: user.id, isVerified: true } });
@@ -326,9 +441,10 @@ exports.resendVerificationCode = async (req, res) => {
 
     if (user.isVerified) return res.status(400).json({ error: 'Tài khoản đã được xác thực' });
 
-    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const newCode = crypto.randomInt(100000, 1000000).toString();
     user.verificationToken = newCode;
-    user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    user.verificationTokenExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    user.verificationAttempts = 0; // Reset attempts on resend
     await user.save();
 
     await mailService.sendVerificationCode(user.email, newCode);

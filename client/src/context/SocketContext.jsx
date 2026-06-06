@@ -17,6 +17,7 @@ export const SocketProvider = ({ children }) => {
       const newSocket = io('/', {
         auth: { token }
       });
+      window.socket = newSocket;
 
       setSocket(newSocket);
 
@@ -44,11 +45,21 @@ export const SocketProvider = ({ children }) => {
       newSocket.on('receiveMessage', handleIncomingMessage);
       newSocket.on('receiveGroupMessage', (msg) => handleIncomingMessage({ ...msg, groupId: msg.groupId }));
 
+      const heartbeatInterval = setInterval(() => {
+        if (newSocket.connected) {
+          newSocket.emit('heartbeat');
+        }
+      }, 30000);
+
       return () => {
+        clearInterval(heartbeatInterval);
         newSocket.off('receiveMessage');
         newSocket.off('receiveGroupMessage');
         newSocket.off('userStatusChange');
         newSocket.close();
+        if (window.socket === newSocket) {
+          window.socket = null;
+        }
       };
     } else {
       setSocket(null);

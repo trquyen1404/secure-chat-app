@@ -30,7 +30,7 @@ const FlashcardSet = sequelize.define('FlashcardSet', {
 FlashcardSet.associate = (models) => {
   FlashcardSet.belongsTo(models.Group, { foreignKey: 'groupId' });
   FlashcardSet.belongsTo(models.User, { foreignKey: 'userId' });
-  FlashcardSet.hasMany(models.Flashcard, { foreignKey: 'setId', as: 'Cards' });
+  FlashcardSet.hasMany(models.Flashcard, { foreignKey: 'setId', as: 'Cards', onDelete: 'CASCADE' });
 };
 
 module.exports = FlashcardSet;

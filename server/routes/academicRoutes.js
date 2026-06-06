@@ -1,54 +1,52 @@
 const express = require('express');
 const router = express.Router();
 const academicController = require('../controllers/academicController');
-const academicControllerV2 = require('../controllers/academicControllerV2');
-const academicControllerV3 = require('../controllers/academicControllerV3');
-const academicControllerV4 = require('../controllers/academicControllerV4');
 const auth = require('../middleware/auth');
+const requireGroupMembership = require('../middleware/groupMembership');
 
 // Announcements
-router.post('/announcements', auth, academicController.createAnnouncement);
-router.get('/announcements/:groupId', auth, academicController.getAnnouncements);
+router.post('/announcements', auth, requireGroupMembership, academicController.createAnnouncement);
+router.get('/announcements/:groupId', auth, requireGroupMembership, academicController.getAnnouncements);
 
 // Notes
-router.get('/notes/:groupId', auth, academicController.getGroupNotes);
-router.post('/notes', auth, academicController.saveNote);
+router.get('/notes/:groupId', auth, requireGroupMembership, academicController.getGroupNotes);
+router.post('/notes', auth, requireGroupMembership, academicController.saveNote);
 
 // Study Partners
 router.post('/study-posts', auth, academicController.createStudyPost);
 router.get('/study-posts', auth, academicController.getStudyPosts);
 
 // Grades
-router.get('/grades/:groupId', auth, academicController.getGrades);
-router.post('/grades', auth, academicController.addGrade);
+router.get('/grades/:groupId', auth, requireGroupMembership, academicController.getGrades);
+router.post('/grades', auth, requireGroupMembership, academicController.addGrade);
 
 // Flashcards
-router.post('/flashcards', auth, academicControllerV2.createFlashcardSet);
-router.get('/flashcards/:groupId', auth, academicControllerV2.getFlashcardSets);
+router.post('/flashcards', auth, requireGroupMembership, academicController.createFlashcardSet);
+router.get('/flashcards/:groupId', auth, requireGroupMembership, academicController.getFlashcardSets);
 
 // Exams
-router.post('/exams', auth, academicControllerV2.createExam);
-router.get('/exams/:groupId', auth, academicControllerV2.getExams);
+router.post('/exams', auth, requireGroupMembership, academicController.createExam);
+router.get('/exams/:groupId', auth, requireGroupMembership, academicController.getExams);
 
 // Gamification
-router.get('/leaderboard', auth, academicControllerV2.getLeaderboard);
+router.get('/leaderboard', auth, academicController.getLeaderboard);
 
 // Marketplace
-router.post('/marketplace', auth, academicControllerV3.createListing);
-router.get('/marketplace', auth, academicControllerV3.getListings);
+router.post('/marketplace', auth, academicController.createListing);
+router.get('/marketplace', auth, academicController.getListings);
 
 // Confessions
-router.post('/confessions', auth, academicControllerV3.createConfession);
-router.get('/confessions/:groupId', auth, academicControllerV3.getConfessions);
+router.post('/confessions', auth, requireGroupMembership, academicController.createConfession);
+router.get('/confessions/:groupId', auth, requireGroupMembership, academicController.getConfessions);
 
 // Lost & Found
-router.post('/lost-found', auth, academicControllerV4.createLostItem);
-router.get('/lost-found', auth, academicControllerV4.getLostItems);
+router.post('/lost-found', auth, academicController.createLostItem);
+router.get('/lost-found', auth, academicController.getLostItems);
 
 // Jobs
-router.get('/jobs', auth, academicControllerV4.getJobs);
+router.get('/jobs', auth, academicController.getJobs);
 
 // Clubs
-router.get('/clubs', auth, academicControllerV4.getClubs);
+router.get('/clubs', auth, academicController.getClubs);
 
 module.exports = router;

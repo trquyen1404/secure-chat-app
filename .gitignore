@@ -5,3 +5,5 @@ build/
 .agents/
 log.txt
 docs
+client/cypress
+client/cypress.config.js

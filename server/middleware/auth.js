@@ -14,7 +14,7 @@ const auth = async (req, res, next) => {
     
     // [Security Hardening] Verify tokenVersion to support global logout/revocation
     const user = await User.findByPk(decoded.userId, { 
-      attributes: ['id', 'role', 'tokenVersion', 'isBanned', 'banReason'] 
+      attributes: ['id', 'role', 'tokenVersion', 'isBanned', 'banReason', 'isVerified'] 
     });
     
     if (!user || user.tokenVersion !== decoded.tokenVersion) {
@@ -23,6 +23,14 @@ const auth = async (req, res, next) => {
 
     if (user.isBanned) {
       return res.status(403).json({ error: 'Tài khoản của bạn đã bị khóa', reason: user.banReason });
+    }
+
+    // Require email verification for all APIs except verification endpoints and logout
+    if (!user.isVerified && 
+        !req.originalUrl.includes('/verify-email') && 
+        !req.originalUrl.includes('/resend-code') && 
+        !req.originalUrl.includes('/logout')) {
+      return res.status(403).json({ error: 'Tài khoản chưa được xác thực email. Vui lòng xác thực trước.', isUnverified: true });
     }
 
     req.userId = user.id;

@@ -31,7 +31,7 @@ const PrivateRoute = ({ children }) => {
            <p className="text-sm font-semibold text-[var(--text-secondary)] animate-pulse uppercase tracking-[0.2em]">Đang khởi tạo bảo mật...</p>
         </div>
       )}
-      {needsPassphraseRestore && <RestoreKeyModal />}
+      {needsPassphraseRestore && user?.isVerified && <RestoreKeyModal />}
       {user && !user.isVerified && <EmailVerification />}
     </div>
   );

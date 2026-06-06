@@ -1,5 +1,5 @@
 const { Op, Sequelize } = require('sequelize');
-const { User, Message, PreKey, Block } = require('../models');
+const { User, PreKey, Block, sequelize } = require('../models');
 const multer = require('multer');
 const path = require('path');
 
@@ -10,7 +10,9 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'user-' + req.userId + '-' + uniqueSuffix + path.extname(file.originalname));
+    const rawExt = path.extname(file.originalname).toLowerCase();
+    const cleanExt = ['.jpg', '.jpeg', '.png', '.webp'].includes(rawExt) ? rawExt : '.jpg';
+    cb(null, 'user-' + req.userId + '-' + uniqueSuffix + cleanExt);
   }
 });
 
@@ -52,11 +54,19 @@ exports.getPreKeyBundle = async (req, res) => {
       where: { userId, type: 'signed' },
       order: [['createdAt', 'DESC']]
     });
-    const otpk = await PreKey.findOne({
-      where: { userId, type: 'one-time', isUsed: false },
-      order: [Sequelize.fn('RANDOM')]
+    let otpk = null;
+    await sequelize.transaction(async (t) => {
+      otpk = await PreKey.findOne({
+        where: { userId, type: 'one-time', isUsed: false },
+        order: [Sequelize.fn('RANDOM')],
+        lock: t.LOCK.UPDATE,
+        skipLocked: true,
+        transaction: t
+      });
+      if (otpk) {
+        await otpk.update({ isUsed: true }, { transaction: t });
+      }
     });
-    if (otpk) await otpk.update({ isUsed: true });
     res.json({
       identityKey: { sign: user.publicKey, dh: user.dhPublicKey },
       signedPreKey: signedPreKey ? { publicKey: signedPreKey.publicKey, signature: signedPreKey.signature } : null,
@@ -90,32 +100,50 @@ exports.getUsers = async (req, res) => {
       attributes: ['id', 'username', 'displayName', 'online', 'avatarUrl', 'themeColor', 'lastSeenAt', 'publicKey', 'dhPublicKey', 'studentId', 'teacherId', 'phone']
     });
 
-    // Attach latest message for each user
-    const usersWithLatestMsg = await Promise.all(users.map(async (u) => {
-      const latestMessage = await Message.findOne({
-        where: {
-          [Op.or]: [
-            { senderId: currentUserId, recipientId: u.id },
-            { senderId: u.id, recipientId: currentUserId }
-          ],
-          [Op.and]: [
-            { type: { [Op.notIn]: ['handshake_ack', 'SENDER_KEY_DISTRIBUTION', 'SESSION_DESYNC_ERROR'] } },
-            {
-              [Op.or]: [
-                { senderEk: null },
-                { encryptedContent: { [Op.ne]: null } }
-              ]
-            }
-          ]
-        },
-        order: [['createdAt', 'DESC']],
-        attributes: ['id', 'senderId', 'recipientId', 'encryptedContent', 'readAt', 'createdAt', 'type']
+    // Fetch latest message for all users in a single query safely to avoid N+1 query problem
+    const peerIds = users.map(u => u.id);
+    const latestMap = {};
+    if (peerIds.length > 0) {
+      const latestMessages = await sequelize.query(
+        `SELECT DISTINCT ON (
+          CASE 
+            WHEN "senderId" = :currentUserId THEN "recipientId" 
+            ELSE "senderId" 
+          END
+         ) 
+          id, 
+          "senderId", 
+          "recipientId", 
+          "encryptedContent", 
+          "readAt", 
+          "createdAt", 
+          "type",
+          CASE 
+            WHEN "senderId" = :currentUserId THEN "recipientId" 
+            ELSE "senderId" 
+          END AS "peerId"
+        FROM "Messages"
+        WHERE (
+          ("senderId" = :currentUserId AND "recipientId" IN (:peerIds))
+          OR 
+          ("recipientId" = :currentUserId AND "senderId" IN (:peerIds))
+        )
+        AND "type" NOT IN ('handshake_ack', 'SENDER_KEY_DISTRIBUTION', 'SESSION_DESYNC_ERROR')
+        AND ("senderEk" IS NULL OR "encryptedContent" IS NOT NULL)
+        ORDER BY "peerId", "createdAt" DESC`,
+        {
+          replacements: { currentUserId, peerIds },
+          type: sequelize.QueryTypes.SELECT
+        }
+      );
+      latestMessages.forEach(m => {
+        latestMap[m.peerId] = m;
       });
+    }
 
-      return {
-        ...u.get({ plain: true }),
-        latestMessage: latestMessage || null
-      };
+    const usersWithLatestMsg = users.map(u => ({
+      ...u.get({ plain: true }),
+      latestMessage: latestMap[u.id] || null
     }));
 
     res.json(usersWithLatestMsg);
@@ -152,8 +180,56 @@ exports.uploadAvatar = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { displayName, bio, studentId, teacherId, phone } = req.body;
-    await User.update({ displayName, bio, studentId, teacherId, phone }, { where: { id: req.userId } });
-    res.json({ success: true, displayName, bio, studentId, teacherId, phone });
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const updates = {};
+    if (displayName !== undefined) updates.displayName = displayName;
+    if (bio !== undefined) updates.bio = bio;
+
+    if (user.role === 'student') {
+      if (teacherId !== undefined && teacherId !== null) {
+        return res.status(403).json({ error: 'Sinh viên không thể cập nhật Mã giảng viên' });
+      }
+      if (studentId !== undefined && studentId !== null) {
+        if (!/^[a-zA-Z0-9_-]{3,20}$/.test(studentId)) {
+          return res.status(400).json({ error: 'Mã sinh viên không hợp lệ (3-20 ký tự, chỉ chứa chữ, số, gạch ngang, gạch dưới)' });
+        }
+        const existing = await User.findOne({ where: { studentId, id: { [Op.ne]: req.userId } } });
+        if (existing) {
+          return res.status(400).json({ error: 'Mã sinh viên đã tồn tại trong hệ thống' });
+        }
+        updates.studentId = studentId;
+      }
+    } else if (user.role === 'teacher') {
+      if (studentId !== undefined && studentId !== null) {
+        return res.status(403).json({ error: 'Giảng viên không thể cập nhật Mã sinh viên' });
+      }
+      if (teacherId !== undefined && teacherId !== null) {
+        if (!/^[a-zA-Z0-9_-]{3,20}$/.test(teacherId)) {
+          return res.status(400).json({ error: 'Mã giảng viên không hợp lệ (3-20 ký tự, chỉ chứa chữ, số, gạch ngang, gạch dưới)' });
+        }
+        const existing = await User.findOne({ where: { teacherId, id: { [Op.ne]: req.userId } } });
+        if (existing) {
+          return res.status(400).json({ error: 'Mã giảng viên đã tồn tại trong hệ thống' });
+        }
+        updates.teacherId = teacherId;
+      }
+    }
+
+    if (phone !== undefined && phone !== null) {
+      if (!/^[0-9]{9,11}$/.test(phone)) {
+        return res.status(400).json({ error: 'Số điện thoại không hợp lệ (chỉ chứa số, từ 9-11 ký tự)' });
+      }
+      const existing = await User.findOne({ where: { phone, id: { [Op.ne]: req.userId } } });
+      if (existing) {
+        return res.status(400).json({ error: 'Số điện thoại đã được sử dụng' });
+      }
+      updates.phone = phone;
+    }
+
+    await user.update(updates);
+    res.json({ success: true, ...updates });
   } catch (error) {
     console.error('[updateProfile]', error);
     res.status(500).json({ error: 'Lỗi khi cập nhật hồ sơ' });
@@ -162,8 +238,12 @@ exports.updateProfile = async (req, res) => {
 
 exports.searchUsers = async (req, res) => {
   try {
-    const { query } = req.query;
+    let { query } = req.query;
     if (!query || query.length < 2) return res.json([]);
+    if (query.length > 50) {
+      query = query.substring(0, 50);
+    }
+    const escapedQuery = query.replace(/[%_]/g, '\\$&');
 
     const currentUserId = req.userId;
     const blocks = await Block.findAll({
@@ -179,11 +259,11 @@ exports.searchUsers = async (req, res) => {
           { id: { [Op.notIn]: blockedIds } },
           {
             [Op.or]: [
-              { username: { [Op.iLike]: `%${query}%` } },
-              { displayName: { [Op.iLike]: `%${query}%` } },
-              { studentId: { [Op.iLike]: `%${query}%` } },
-              { teacherId: { [Op.iLike]: `%${query}%` } },
-              { phone: { [Op.iLike]: `%${query}%` } },
+              { username: { [Op.iLike]: `%${escapedQuery}%` } },
+              { displayName: { [Op.iLike]: `%${escapedQuery}%` } },
+              { studentId: { [Op.iLike]: `%${escapedQuery}%` } },
+              { teacherId: { [Op.iLike]: `%${escapedQuery}%` } },
+              { phone: { [Op.iLike]: `%${escapedQuery}%` } },
             ]
           }
         ]
@@ -225,6 +305,9 @@ exports.uploadPreKeys = async (req, res) => {
     if (!signedPreKey || !signedPreKey.publicKey || !signedPreKey.signature) {
       return res.status(400).json({ error: 'Signed PreKey and signature are required' });
     }
+    if (oneTimePreKeys && Array.isArray(oneTimePreKeys) && oneTimePreKeys.length > 100) {
+      return res.status(400).json({ error: 'Maximum 100 One-Time PreKeys allowed' });
+    }
     await User.sequelize.transaction(async (t) => {
       await PreKey.destroy({ where: { userId: req.userId }, transaction: t });
       await PreKey.create({
@@ -256,6 +339,9 @@ exports.uploadOpks = async (req, res) => {
     const { oneTimePreKeys } = req.body;
     if (!oneTimePreKeys || !Array.isArray(oneTimePreKeys)) {
       return res.status(400).json({ error: 'oneTimePreKeys array is required' });
+    }
+    if (oneTimePreKeys.length > 100) {
+      return res.status(400).json({ error: 'Maximum 100 One-Time PreKeys allowed' });
     }
     
     await User.sequelize.transaction(async (t) => {
@@ -353,10 +439,10 @@ exports.getProfile = async (req, res) => {
   try {
     const user = await User.findByPk(req.userId, { 
       attributes: [
-        'id', 'username', 'displayName', 'bio', 'avatarUrl', 'themeColor', 
+        'id', 'username', 'email', 'displayName', 'bio', 'avatarUrl', 'themeColor', 
         'online', 'lastSeenAt', 'publicKey', 'dhPublicKey',
         'encryptedPrivateKey', 'keyBackupSalt', 'keyBackupIv', 'vaultVersion',
-        'studentId', 'teacherId', 'phone', 'role'
+        'studentId', 'teacherId', 'phone', 'role', 'isVerified'
       ] 
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -369,8 +455,8 @@ exports.getProfile = async (req, res) => {
 
 exports.clearPreKeys = async (req, res) => {
   try {
-    await PreKey.destroy({ where: { userId: req.userId } });
-    console.log(`[AUTH-WIPE] Destroyed all PreKeys for user ${req.userId} due to logout.`);
+    await PreKey.destroy({ where: { userId: req.userId, type: 'one-time' } });
+    console.log(`[AUTH-WIPE] Destroyed all one-time PreKeys for user ${req.userId} due to logout.`);
     res.json({ success: true });
   } catch (error) {
     console.error('[clearPreKeys]', error);
