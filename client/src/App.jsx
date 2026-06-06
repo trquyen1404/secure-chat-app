@@ -62,19 +62,21 @@ function App() {
     const CURRENT_V = 'v19_1_deadlock_breaker';
     if (localStorage.getItem('crypto_version') !== CURRENT_V) {
       console.warn('New protocol detected. Clearing old security data...');
-      
+
+      const hadToken = !!localStorage.getItem('token');
       localStorage.setItem('crypto_version', CURRENT_V);
       localStorage.removeItem('token'); // Force re-auth
-      
+
       Promise.all([
         clearRatchetDB(),
         clearKeyStore()
       ]).then(() => {
         console.log('[App] Global storage purged. Version:', CURRENT_V);
-        window.location.reload();
+        // Only reload if user was previously logged in; avoids wiping login error state
+        if (hadToken) window.location.reload();
       }).catch(err => {
         console.error('[App] Purge failed:', err);
-        window.location.reload();
+        if (hadToken) window.location.reload();
       });
     }
   }, []);

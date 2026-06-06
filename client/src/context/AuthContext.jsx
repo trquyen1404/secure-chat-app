@@ -10,7 +10,14 @@ const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      return null;
+    }
+  });
   const [token, setToken] = useState(localStorage.getItem('token') || null);
   const [identityKeys, setIdentityKeys] = useState(null);
   const [masterKey, setMasterKey] = useState(null); // RAM-only Master Key
@@ -141,14 +148,18 @@ export const AuthProvider = ({ children }) => {
             setNeedsPassphraseRestore(true);
           }
         } catch (err) {
-          console.warn('[AUTH] Session invalid or expired during init. Cleaning up.', err);
-          await logout();
+          if (err.response?.status === 403 && err.response?.data?.isUnverified) {
+            console.log('[AUTH] User is unverified. Gating with verification screen.');
+          } else {
+            console.warn('[AUTH] Session invalid or expired during init. Cleaning up.', err);
+            await logout();
+          }
         }
       }
       setLoading(false);
     };
     init();
-  }, [token]);
+  }, [token, user?.isVerified]);
 
   const login = async (data) => {
     setToken(data.token);
